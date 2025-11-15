@@ -1,0 +1,4 @@
+product_id,name,price,category,in_stock
+1,Laptop,999.99,Electronics,True
+2,Mouse,29.99,Electronics,True
+3,Keyboard,79.99,Electronics,False
