@@ -1,0 +1,22 @@
+{
+  "user": {
+    "id": 1,
+    "profile": {
+      "name": "Alice",
+      "address": {
+        "street": "123 Main St",
+        "city": "NYC"
+      }
+    },
+    "posts": [
+      {
+        "title": "Post 1",
+        "content": "Long content here..."
+      },
+      {
+        "title": "Post 2",
+        "content": "More content..."
+      }
+    ]
+  }
+}

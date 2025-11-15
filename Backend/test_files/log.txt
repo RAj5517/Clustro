@@ -1,0 +1,6 @@
+
+2024-01-01 10:00:00 INFO Application started
+2024-01-01 10:05:23 ERROR Failed to connect to database
+2024-01-01 10:10:45 WARNING High memory usage detected
+2024-01-01 10:15:12 INFO Request processed successfully
+        
