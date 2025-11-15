@@ -90,7 +90,14 @@ class ClassificationProcessor:
             for file_obj in files:
                 if hasattr(file_obj, 'filename') and file_obj.filename:
                     # Flask file object
+                    # Preserve folder structure from uploaded folder
                     file_path = Path(temp_dir) / file_obj.filename
+                    
+                    # Create parent directories recursively if they don't exist
+                    # This handles nested folders (folder/subfolder/file.csv)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    
+                    # Save the file
                     file_obj.save(str(file_path))
                     saved_files.append(file_path)
                 elif isinstance(file_obj, (str, Path)):
@@ -217,8 +224,17 @@ class ClassificationProcessor:
             print(f"[INFO] Processing {len(sql_files)} SQL files through schema generator...")
             for file_path, file_result in sql_files:
                 try:
+                    print(f"[INFO] Generating schema for: {file_path.name}")
                     # Generate schema
                     schema_result = generate_schema(str(file_path), self.db_config)
+                    
+                    print(f"[INFO] Schema generation result: success={schema_result.get('success')}, "
+                          f"tables={len(schema_result.get('tables', []))}, "
+                          f"jobs_created={schema_result.get('jobs_created', 0)}")
+                    
+                    if schema_result.get('errors'):
+                        print(f"[WARNING] Schema generation errors: {schema_result.get('errors')}")
+                    
                     file_result['sql_result'] = {
                         'schema_generation': schema_result,
                         'tables': schema_result.get('tables', []),
@@ -226,11 +242,21 @@ class ClassificationProcessor:
                     }
                     
                     # Execute pending jobs if any were created
-                    if schema_result.get('jobs_created', 0) > 0:
+                    jobs_created = schema_result.get('jobs_created', 0)
+                    if jobs_created > 0:
+                        print(f"[INFO] Executing {jobs_created} pending jobs...")
                         executor_result = execute_pending_jobs(self.db_config, stop_on_error=False)
+                        print(f"[INFO] Execution complete: completed={executor_result.get('completed', 0)}, "
+                              f"failed={executor_result.get('failed', 0)}")
                         file_result['sql_result']['execution'] = executor_result
+                    else:
+                        print(f"[WARNING] No jobs created for {file_path.name}. Check if table already exists or schema generation failed.")
                         
                 except Exception as e:
+                    import traceback
+                    error_trace = traceback.format_exc()
+                    print(f"[ERROR] Error processing {file_path.name}: {e}")
+                    print(f"[ERROR] Traceback: {error_trace}")
                     file_result['error'] = str(e) if not file_result.get('error') else file_result['error']
                     file_result['sql_result'] = {
                         'error': str(e),

@@ -1,58 +1,136 @@
-# main.py
 import json
 import argparse
+import sys
+from pathlib import Path
+import chromadb
 
-from multimodal_pipeline import MultiModalPipeline
+
+# ------------------------------
+# Utility class to silence noisy libs
+# ------------------------------
+class _DevNull:
+    def write(self, _):
+        return 0
+
+    def flush(self):
+        return 0
+
+    def close(self):
+        # Some logging handlers call .close() on their stream at exit.
+        # Make this a no-op so atexit doesn't crash.
+        return 0
 
 
-if __name__ == "__main__":
+# ------------------------------
+# Main
+# ------------------------------
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "path",
-        help="Path to file (image / video / audio / text)",
+        help="Path to file (image/video/audio/text)",
     )
     parser.add_argument(
         "--no-audio",
         action="store_true",
-        help="Disable Whisper/audio (avoids SSL/download issues if you only test images/videos/text)",
+        help="Disable audio transcription support.",
+    )
+    parser.add_argument(
+        "--collection",
+        default="clip_embeddings",
+        help="ChromaDB collection name (default: clip_embeddings)",
+    )
+    parser.add_argument(
+        "--chroma-path",
+        default="./chroma_db",
+        help="Directory for persistent ChromaDB storage",
     )
     args = parser.parse_args()
 
-    pipe = MultiModalPipeline(enable_audio=not args.no_audio)
+    # Resolve absolute input path
+    input_path = str(Path(args.path).expanduser().resolve())
 
-    info = pipe.encode_path(args.path)
-    emb = info["embedding"]
+    # ------------------------------
+    # Silence model + library noise while loading + encoding
+    # ------------------------------
+    real_stdout, real_stderr = sys.stdout, sys.stderr
+    sys.stdout = _DevNull()
+    sys.stderr = _DevNull()
 
-    if emb is not None:
-        emb_dim = len(emb)
+    try:
+        # Import inside silenced block
+        from multimodal_pipeline import MultiModalPipeline
 
-        # IMPORTANT:
-        # Print embedding using Python repr, NOT JSON, so truncation happens automatically.
-        embedding_preview = repr(emb)   # << this is the key line
-    else:
-        emb_dim = 0
-        embedding_preview = None
+        pipe = MultiModalPipeline(enable_audio=not args.no_audio)
+        info = pipe.encode_path(input_path)
 
-    output = {
-        "path": info["path"],
-        "modality": info["modality"],
-        "text": info["text"],
-        "embedding_dim": emb_dim,
-        "embedding_preview": embedding_preview,
-        "extra": info["extra"],
+    finally:
+        # Restore clean output
+        sys.stdout = real_stdout
+        sys.stderr = real_stderr
+
+    # Extract embedding
+    emb = info.get("embedding")
+    emb_dim = len(emb) if emb else 0
+
+    # ------------------------------
+    # Connect to ChromaDB
+    # ------------------------------
+    client = chromadb.PersistentClient(path=args.chroma_path)
+    collection = client.get_or_create_collection(name=args.collection)
+
+    chroma_id = input_path  # unique ID per file
+
+    # ------------------------------
+    # Sanitize metadata for ChromaDB
+    # ------------------------------
+    raw_metadata = {
+        "path": info.get("path"),
+        "modality": info.get("modality"),
+        **(info.get("extra") or {}),
     }
 
-    # Print JSON WITHOUT embedding (to keep it clean)
-    clean_output = {k: v for k, v in output.items() if k != "embedding_preview"}
+    sanitized_metadata = {}
+    for key, value in raw_metadata.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            sanitized_metadata[key] = value
+        else:
+            # Convert unsupported types (lists, dicts, numpy types...) to JSON strings
+            try:
+                sanitized_metadata[key] = json.dumps(value)
+            except Exception:
+                sanitized_metadata[key] = str(value)
+
+    # ------------------------------
+    # Upsert into ChromaDB
+    # ------------------------------
+    if emb is not None:
+        collection.upsert(
+            ids=[chroma_id],
+            embeddings=[emb],
+            documents=[info.get("text") or ""],
+            metadatas=[sanitized_metadata],
+        )
+
+    # ------------------------------
+    # Clean final output (no embeddings / no vector sizes)
+    # ------------------------------
+    output = {
+        "path": info.get("path"),
+        "modality": info.get("modality"),
+        "text": info.get("text"),
+        "embedding_dim": emb_dim,
+        "chroma_collection": collection.name,
+        "chroma_id": chroma_id,
+        "extra": info.get("extra"),
+    }
+
     print("=== RESULT ===")
-    print(json.dumps(clean_output, indent=2))
+    print(json.dumps(output, indent=2))
 
-    # Print embedding separately in raw Python form (auto-truncates)
-    print("\n=== EMBEDDING (auto-truncated by Python) ===")
-    print(embedding_preview)
 
-    print("\n=== VECTOR SPACES SIZES ===")
-    print(f"image_space: {len(pipe.image_space)}")
-    print(f"video_space: {len(pipe.video_space)}")
-    print(f"audio_space: {len(pipe.audio_space)}")
-    print(f"text_space:  {len(pipe.text_space)}")
+# ------------------------------
+# Entry point
+# ------------------------------
+if __name__ == "__main__":
+    main()

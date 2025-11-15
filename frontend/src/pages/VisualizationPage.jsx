@@ -14,7 +14,7 @@ import {
   FileText,
   Play
 } from 'lucide-react'
-import { getVisualizationData, searchFiles, downloadFile, searchVideos } from '../services/api'
+import { getVisualizationData, searchFiles, downloadFile, searchVideos, getDatabaseState } from '../services/api'
 
 const VisualizationPage = ({ onNavigate }) => {
   const [fileTree, setFileTree] = useState(null)
@@ -25,6 +25,9 @@ const VisualizationPage = ({ onNavigate }) => {
   const [videoSearchResults, setVideoSearchResults] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [databaseState, setDatabaseState] = useState(null)
+  const [schemaLoading, setSchemaLoading] = useState(false)
+  const [schemaError, setSchemaError] = useState(null)
 
   // Mock file tree structure for now
   const mockFileTree = {
@@ -80,7 +83,25 @@ const VisualizationPage = ({ onNavigate }) => {
     setFileTree(mockFileTree)
     // Expand root by default
     setExpandedFolders(new Set(['Root']))
+    
+    // Fetch database schema on page load
+    fetchDatabaseSchema()
   }, [])
+
+  const fetchDatabaseSchema = async () => {
+    try {
+      setSchemaLoading(true)
+      setSchemaError(null)
+      const state = await getDatabaseState()
+      setDatabaseState(state)
+    } catch (err) {
+      console.error('Failed to fetch database schema:', err)
+      setSchemaError('Failed to load database schema')
+      setDatabaseState(null)
+    } finally {
+      setSchemaLoading(false)
+    }
+  }
 
   const fetchVisualizationData = async () => {
     try {
@@ -263,6 +284,100 @@ const VisualizationPage = ({ onNavigate }) => {
           <p className="text-gray-400">
             Browse and download your stored files in a tree structure
           </p>
+        </motion.div>
+
+        {/* SQL Schema Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass rounded-xl p-6 mb-6 border border-purple-500/30"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Database className="w-6 h-6 text-purple-400" />
+              <h3 className="text-xl font-bold text-purple-400">SQL Schema</h3>
+            </div>
+            <button
+              onClick={fetchDatabaseSchema}
+              disabled={schemaLoading}
+              className="px-3 py-1.5 bg-purple-600/20 text-purple-400 text-sm font-medium rounded hover:bg-purple-600/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {schemaLoading ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
+
+          {schemaLoading && !databaseState ? (
+            <div className="text-center py-8 text-gray-400">
+              <Database className="w-12 h-12 mx-auto mb-2 opacity-50 animate-pulse" />
+              <p>Loading database schema...</p>
+            </div>
+          ) : schemaError ? (
+            <div className="p-4 bg-red-900/20 border border-red-500/50 rounded-lg text-red-300 text-sm">
+              ⚠️ {schemaError}
+            </div>
+          ) : databaseState?.tables && databaseState.tables.length > 0 ? (
+            <div className="space-y-4">
+              {databaseState.tables.map((table, index) => (
+                <motion.div
+                  key={table.name}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  className="bg-black/40 rounded-lg p-4 border border-gray-700 hover:border-purple-500/50 transition-colors"
+                >
+                  <div className="flex items-center gap-2 mb-3">
+                    <Database className="w-5 h-5 text-purple-400" />
+                    <h4 className="text-lg font-semibold text-white">{table.name}</h4>
+                    <span className="text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded">
+                      {table.columns?.length || 0} columns
+                    </span>
+                  </div>
+                  
+                  {table.columns && table.columns.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-700">
+                            <th className="text-left py-2 px-3 text-purple-400 font-semibold">Column Name</th>
+                            <th className="text-left py-2 px-3 text-purple-400 font-semibold">Type</th>
+                            <th className="text-center py-2 px-3 text-purple-400 font-semibold">Nullable</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {table.columns.map((column, colIndex) => (
+                            <tr 
+                              key={colIndex} 
+                              className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
+                            >
+                              <td className="py-2 px-3 text-gray-300 font-mono">{column.name}</td>
+                              <td className="py-2 px-3 text-gray-400 font-mono text-xs">{column.type}</td>
+                              <td className="py-2 px-3 text-center">
+                                <span className={`px-2 py-1 rounded text-xs ${
+                                  column.nullable 
+                                    ? 'bg-yellow-900/30 text-yellow-300' 
+                                    : 'bg-red-900/30 text-red-300'
+                                }`}>
+                                  {column.nullable ? 'NULL' : 'NOT NULL'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-gray-400 text-sm">No columns found</p>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-400">
+              <Database className="w-12 h-12 mx-auto mb-2 opacity-50" />
+              <p>No SQL tables found</p>
+              <p className="text-sm text-gray-500 mt-2">Upload SQL-capable files to create tables</p>
+            </div>
+          )}
         </motion.div>
 
         {/* Search Bar */}

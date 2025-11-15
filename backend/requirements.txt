@@ -33,3 +33,5 @@ sentencepiece
 
 # Optional (if you want ffmpeg; pip version)
 ffmpeg-python
+chromadb
+protobuf<5.0.0
