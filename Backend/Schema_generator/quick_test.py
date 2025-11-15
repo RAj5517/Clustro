@@ -20,6 +20,21 @@ db_config = get_db_config()
 print(f"[OK] Database: {db_config['database']} at {db_config['host']}:{db_config['port']}")
 print()
 
+# Step 0: Clean up any existing test table from previous runs
+print("Step 0: Cleaning up previous test table (if exists)...")
+import psycopg2
+try:
+    conn = psycopg2.connect(**db_config)
+    cursor = conn.cursor()
+    cursor.execute("DROP TABLE IF EXISTS test_quick CASCADE;")
+    conn.commit()
+    cursor.close()
+    conn.close()
+    print("[OK] Cleaned up previous test table")
+except Exception as e:
+    print(f"[WARNING] Could not clean up: {e}")
+print()
+
 # Step 1: Create a simple test file
 print("Step 1: Creating test file...")
 test_file = Path("test_quick.json")

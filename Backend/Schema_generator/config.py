@@ -10,7 +10,15 @@ from typing import Dict, Any
 # Try to load .env file if python-dotenv is available
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    try:
+        load_dotenv()
+    except UnicodeDecodeError:
+        # .env file has encoding issues, skip it
+        # User can set environment variables directly or fix the .env file
+        pass
+    except Exception:
+        # Other errors loading .env (file not found, etc.) - ignore
+        pass
 except ImportError:
     pass  # python-dotenv is optional
 
