@@ -100,9 +100,18 @@ class FileClassifier:
         elif self.file_type in ['pdf', 'docx']:
             self._analyze_document()
         else:
-            # Unknown file type - lean towards NoSQL
-            self.nosql_score += 2
-            self.reasons.append("Unknown file type - defaulting to NoSQL (unstructured)")
+            # Unknown file type - try to analyze as text first
+            if self.file_content is None:
+                # Binary file or couldn't parse - lean towards NoSQL
+                self.nosql_score += 2
+                self.reasons.append("Unknown binary file type - defaulting to NoSQL (unstructured)")
+            elif isinstance(self.file_content, str):
+                # Analyze unknown file as text to detect any structured patterns
+                self._analyze_unknown_text()
+            else:
+                # Non-text unknown file - lean towards NoSQL
+                self.nosql_score += 2
+                self.reasons.append("Unknown file type - defaulting to NoSQL (unstructured)")
         
         # Determine classification
         classification = 'SQL' if self.sql_score >= self.nosql_score else 'NoSQL'
@@ -210,9 +219,13 @@ class FileClassifier:
             return config
         
         else:
-            # Try to read as text
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                return f.read()
+            # Try to read as text (for unknown file types)
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    return f.read()
+            except (UnicodeDecodeError, ValueError):
+                # Binary file - return None to indicate non-text
+                return None
     
     def _analyze_json(self):
         """Analyze JSON structure and assign scores."""
@@ -395,6 +408,69 @@ class FileClassifier:
         self.reasons.append("File is document-based (PDF/DOCX extracted text) - +3 NoSQL")
         
         if len(text_content) > 3000:
+            self.nosql_score += 2
+            self.reasons.append("Contains large free-text fields - +2 NoSQL")
+    
+    def _analyze_unknown_text(self):
+        """Analyze unknown file types as text, trying to detect structured patterns."""
+        text_content = self.file_content
+        
+        # Default: Unknown files lean towards NoSQL but we analyze first
+        self.nosql_score += 2
+        self.reasons.append("Unknown file type - defaulting to NoSQL (unstructured)")
+        
+        # Try to detect structured patterns
+        lines = text_content.split('\n') if text_content else []
+        
+        # Check for CSV-like patterns (comma-separated)
+        if len(lines) > 1:
+            # Check if lines look like CSV
+            first_line_fields = len(lines[0].split(','))
+            if first_line_fields > 1:
+                consistent = all(len(line.split(',')) == first_line_fields for line in lines[:10] if line.strip())
+                if consistent:
+                    self.sql_score += 3
+                    self.reasons.append("Unknown file contains tabular patterns (CSV-like) - +3 SQL")
+            
+            # Check for TSV-like patterns (tab-separated)
+            first_line_tsv = len(lines[0].split('\t'))
+            if first_line_tsv > 1:
+                consistent_tsv = all(len(line.split('\t')) == first_line_tsv for line in lines[:10] if line.strip())
+                if consistent_tsv:
+                    self.sql_score += 3
+                    self.reasons.append("Unknown file contains tabular patterns (TSV-like) - +3 SQL")
+        
+        # Check for JSON-like patterns (even if not .json extension)
+        text_stripped = text_content.strip()
+        if (text_stripped.startswith('{') and text_stripped.endswith('}')) or \
+           (text_stripped.startswith('[') and text_stripped.endswith(']')):
+            try:
+                parsed_json = json.loads(text_content)
+                # Re-analyze as JSON if valid
+                self.nosql_score -= 2  # Remove the unknown penalty
+                self.reasons.pop()  # Remove the default reason
+                self.reasons.append("Unknown file type but contains valid JSON - analyzing as JSON")
+                self.file_content = parsed_json
+                self._analyze_json()
+                return
+            except (json.JSONDecodeError, ValueError):
+                pass  # Not valid JSON, continue as text
+        
+        # Check for XML-like patterns
+        if text_content.strip().startswith('<?xml') or text_content.strip().startswith('<'):
+            try:
+                parsed_xml = ET.fromstring(text_content)
+                self.nosql_score -= 2  # Remove the unknown penalty
+                self.reasons.pop()  # Remove the default reason
+                self.reasons.append("Unknown file type but contains valid XML - analyzing as XML")
+                self.file_content = parsed_xml
+                self._analyze_xml()
+                return
+            except ET.ParseError:
+                pass  # Not valid XML, continue as text
+        
+        # If large text content, add NoSQL points
+        if len(text_content) > 5000:
             self.nosql_score += 2
             self.reasons.append("Contains large free-text fields - +2 NoSQL")
     

@@ -1,3 +1,9 @@
+# PostgreSQL database driver (required for schema generator and executor)
+psycopg2-binary>=2.9.0
+
+# Environment variable management (for cloud database configuration)
+python-dotenv>=1.0.0  # Optional: for loading .env files
+
 # Core dependencies (recommended for full functionality)
 pandas>=2.0.0
 PyYAML>=6.0
@@ -7,7 +13,7 @@ PyPDF2>=3.0.0
 # Optional: For better Excel support
 openpyxl>=3.1.0  # Required for pandas to read .xlsx files
 
-# Note: The classifier will work without these dependencies,
+# Note: The classifier and schema generator will work without these dependencies,
 # but will have limited support for certain file types:
 # - Without pandas: CSV/Excel parsing will be basic
 # - Without PyYAML: YAML files won't be supported
