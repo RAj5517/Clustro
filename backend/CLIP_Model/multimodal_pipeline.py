@@ -1,7 +1,7 @@
 # multimodal_pipeline.py
 import mimetypes
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional  # ✅ Optional added
+from typing import Dict, Any, Tuple, Optional
 
 import numpy as np
 import torch
@@ -35,7 +35,8 @@ class MultiModalPipeline:
         clip_model_name: str = "ViT-B-32",
         clip_pretrained: str = "openai",
         caption_model_name: str = "Salesforce/blip-image-captioning-base",
-        max_frames_per_video: Optional[int] = None,   # ✅ no cap by default
+        max_frames_per_video: Optional[int] = None,   # optional hard cap
+        frames_per_second_factor: float = 0.3,        # ✅ ~0.3 frames per second
     ):
         self.clip = CLIPBackend(model_name=clip_model_name, pretrained=clip_pretrained)
         self.captioner = CaptionBackend(model_name=caption_model_name)
@@ -44,7 +45,8 @@ class MultiModalPipeline:
         self.enable_audio = enable_audio
         self.audio_backend = AudioBackend(model_name=audio_model_name) if enable_audio else None
 
-        self.max_frames_per_video = max_frames_per_video  # may be None
+        self.max_frames_per_video = max_frames_per_video
+        self.frames_per_second_factor = frames_per_second_factor
 
         # vector spaces
         self.image_space: Dict[str, np.ndarray] = {}
@@ -142,7 +144,7 @@ class MultiModalPipeline:
 
         return caption, emb, extra
 
-    # -------------- video (1 frame per second, optional cap, with progress) --------------
+    # -------------- video (duration * 0.3 frames + progress) --------------
 
     @torch.no_grad()
     def _encode_video(self, path: str) -> Tuple[str, torch.Tensor, Dict[str, Any]]:
@@ -157,22 +159,26 @@ class MultiModalPipeline:
             cap.release()
             raise RuntimeError(f"Video has no frames: {path}")
 
-        # 1 frame per second
+        # ---- compute duration ----
         if fps > 0:
             duration_seconds = frame_count / fps
-            num_frames = max(1, int(duration_seconds))  # 1 fps
-
-            # apply cap only if explicitly set
-            if self.max_frames_per_video is not None:
-                num_frames = min(num_frames, self.max_frames_per_video)
-
-            indices = (np.arange(num_frames) * int(round(fps))).astype(int)
-            indices = np.clip(indices, 0, frame_count - 1)
-            indices = np.unique(indices)
         else:
-            # fallback: N evenly spaced frames
-            fallback_num = self.max_frames_per_video if self.max_frames_per_video is not None else 8
-            indices = np.linspace(0, frame_count - 1, fallback_num, dtype=int)
+            # assume 30 fps if unknown, just for the scaling
+            duration_seconds = frame_count / 30.0
+
+        # ---- number of frames = duration * 0.3 ----
+        base_num_frames = max(1, int(duration_seconds * self.frames_per_second_factor))
+
+        if self.max_frames_per_video is not None:
+            num_frames = min(base_num_frames, self.max_frames_per_video)
+        else:
+            num_frames = base_num_frames
+
+        # don't sample more frames than exist
+        num_frames = min(num_frames, frame_count)
+
+        # uniform sampling across the full video
+        indices = np.linspace(0, frame_count - 1, num_frames, dtype=int)
 
         frame_embs = []
         frame_captions = []
@@ -202,7 +208,7 @@ class MultiModalPipeline:
             print(f"\rProcessing video frames: {processed}/{total_frames_to_process} ({progress:.1f}%)", end="")
 
         cap.release()
-        print()  # move to new line after progress
+        print()  # newline after progress
 
         if not frame_embs:
             raise RuntimeError(f"No frames could be read from video: {path}")
@@ -220,7 +226,9 @@ class MultiModalPipeline:
         extra = {
             "frame_count": frame_count,
             "fps": fps,
+            "duration_seconds": duration_seconds,
             "used_frames": len(frame_embs),
+            "frames_factor": self.frames_per_second_factor,
             "frame_indices": indices.tolist(),
             "frame_captions": frame_captions,
         }
