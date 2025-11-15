@@ -142,3 +142,4 @@ test_files/
 *.test.json
 *.test.csv
 
+.DS_Store

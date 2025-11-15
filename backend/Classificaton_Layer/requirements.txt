@@ -1,0 +1,11 @@
+# Flask web framework
+Flask>=2.3.0
+flask-cors>=4.0.0
+Werkzeug>=2.3.0
+
+# File handling
+pathlib2>=2.3.7; python_version < '3.4'
+
+# Note: CLIP_Model dependencies should be installed separately
+# See: ../backend/CLIP_Model/requirements.txt
+
