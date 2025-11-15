@@ -1,22 +1,35 @@
-# PostgreSQL database driver (required for schema generator and executor)
+# PostgreSQL database driver
 psycopg2-binary>=2.9.0
 
-# Environment variable management (for cloud database configuration)
-python-dotenv>=1.0.0  # Optional: for loading .env files
+# Environment variable management
+python-dotenv>=1.0.0
 
-# Core dependencies (recommended for full functionality)
+# Core parsing libraries
 pandas>=2.0.0
 PyYAML>=6.0
 python-docx>=1.0.0
 PyPDF2>=3.0.0
+openpyxl>=3.1.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
 
-# Optional: For better Excel support
-openpyxl>=3.1.0  # Required for pandas to read .xlsx files
+# Flask API server
+Flask>=2.3.0
+flask-cors>=4.0.0
+Werkzeug>=2.3.0
 
-# Note: The classifier and schema generator will work without these dependencies,
-# but will have limited support for certain file types:
-# - Without pandas: CSV/Excel parsing will be basic
-# - Without PyYAML: YAML files won't be supported
-# - Without python-docx: DOCX files won't be supported
-# - Without PyPDF2: PDF files won't be supported
+# Machine Learning / AI models
+torch
+torchvision
+torchaudio
+open_clip_torch
+pillow
+opencv-python
+numpy
+openai-whisper
+transformers
+accelerate
+sentencepiece
 
+# Optional (if you want ffmpeg; pip version)
+ffmpeg-python

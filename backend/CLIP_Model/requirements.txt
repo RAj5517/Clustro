@@ -1,8 +1,0 @@
-pip install torch torchvision torchaudio
-pip install open_clip_torch
-pip install pillow opencv-python numpy
-pip install openai-whisper
-pip install transformers accelerate sentencepiece
-pip install PyPDF2
-pip install PyPDF2 python-docx pandas openpyxl pyyaml beautifulsoup4 lxml
-conda install -c conda-forge ffmpeg

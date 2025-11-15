@@ -7,6 +7,7 @@ const DataInput = ({ onDataSubmit }) => {
   const [files, setFiles] = useState([])
   const [metadata, setMetadata] = useState('')
   const fileInputRef = useRef(null)
+  const folderInputRef = useRef(null)
 
   const handleDrag = (e) => {
     e.preventDefault()
@@ -35,6 +36,14 @@ const DataInput = ({ onDataSubmit }) => {
       setFiles(prev => [...prev, ...selectedFiles])
     }
   }
+  
+  // Handle folder selection (when webkitdirectory is enabled)
+  const handleFolderInput = (e) => {
+    if (e.target.files) {
+      const folderFiles = Array.from(e.target.files)
+      setFiles(prev => [...prev, ...folderFiles])
+    }
+  }
 
   const handleSubmit = () => {
     if (files.length > 0) {
@@ -44,9 +53,12 @@ const DataInput = ({ onDataSubmit }) => {
       })
       setFiles([])
       setMetadata('')
-      // Reset input
+      // Reset inputs
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
+      }
+      if (folderInputRef.current) {
+        folderInputRef.current.value = ''
       }
     }
   }
@@ -86,42 +98,71 @@ const DataInput = ({ onDataSubmit }) => {
       </div>
 
       {/* Unified Drop Zone - Accepts both files and folders */}
-      <motion.div
-        onDragEnter={handleDrag}
-        onDragLeave={handleDrag}
-        onDragOver={handleDrag}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
-        className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-300 hover-lift ${
-          dragActive
-            ? 'border-purple-400 bg-purple-500/20 scale-105 glow-purple'
-            : 'border-gray-600 hover:border-purple-400 hover:bg-gray-800/30 hover:shadow-lg hover:shadow-purple-500/20'
-        }`}
-      >
+      <div className="relative">
         <motion.div
-          animate={dragActive ? { rotate: 360 } : { rotate: 0 }}
-          transition={{ duration: 0.5 }}
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-300 hover-lift ${
+            dragActive
+              ? 'border-purple-400 bg-purple-500/20 scale-105 glow-purple'
+              : 'border-gray-600 hover:border-purple-400 hover:bg-gray-800/30 hover:shadow-lg hover:shadow-purple-500/20'
+          }`}
         >
-          <Upload className="w-12 h-12 mx-auto mb-4 text-purple-400" />
+          <motion.div
+            animate={dragActive ? { rotate: 360 } : { rotate: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <Upload className="w-12 h-12 mx-auto mb-4 text-purple-400" />
+          </motion.div>
+          <p className="text-lg font-semibold mb-2">
+            Drop files or folder here, or click to upload
+          </p>
+          <p className="text-sm text-gray-400 mb-2">
+            Supports all file types - images, videos, documents, JSON, etc.
+          </p>
+          <p className="text-xs text-gray-500">
+            Drag & drop or click to browse files/folders
+          </p>
         </motion.div>
-        <p className="text-lg font-semibold mb-2">
-          Drop files or folder here or click to upload
-        </p>
-        <p className="text-sm text-gray-400">
-          Supports all file types - images, videos, documents, JSON, etc. You can upload individual files or entire folders.
-        </p>
+        
+        {/* Small button overlay for folder selection */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            folderInputRef.current?.click()
+          }}
+          className="absolute top-2 right-2 text-xs text-purple-400 hover:text-purple-300 bg-black/50 px-2 py-1 rounded border border-purple-500/30 hover:border-purple-400/50 transition-all"
+          title="Select folder"
+        >
+          📁 Folder
+        </button>
+        
+        {/* File input - for individual files */}
         <input
           ref={fileInputRef}
           type="file"
           multiple
-          webkitdirectory=""
-          directory=""
           onChange={handleFileInput}
           className="hidden"
+          id="file-input"
         />
-      </motion.div>
+        {/* Folder input - for folder selection */}
+        <input
+          ref={folderInputRef}
+          type="file"
+          multiple
+          webkitdirectory=""
+          directory=""
+          onChange={handleFolderInput}
+          className="hidden"
+          id="folder-input"
+        />
+      </div>
 
       {/* Selected Files */}
       {files.length > 0 && (
@@ -138,6 +179,7 @@ const DataInput = ({ onDataSubmit }) => {
               onClick={() => {
                 setFiles([])
                 if (fileInputRef.current) fileInputRef.current.value = ''
+                if (folderInputRef.current) folderInputRef.current.value = ''
               }}
               className="text-xs text-red-400 hover:text-red-300"
             >

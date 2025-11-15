@@ -1,49 +1,69 @@
-# Python (Backend)
+# ---------------------------------------
+# PYTHON BACKEND
+# ---------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-*.log
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Python build artifacts
 build/
-develop-eggs/
 dist/
+develop-eggs/
 downloads/
 eggs/
 .eggs/
 lib/
 lib64/
-*.DS_Store
-
 parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
-# Virtual Environments
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-.venv
+# Logs
+*.log
+logs/
 
-# Python Testing
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
 .hypothesis/
-test_files/
 *.cover
+*.test.*
+test_files/
 
-# Node.js / Frontend
+# Environment variables
+.env
+.env.*
+!*.example
+
+# ---------------------------------------
+# FRONTEND (NODE / REACT)
+# ---------------------------------------
 node_modules/
 npm-debug.log*
 yarn-debug.log*
@@ -58,88 +78,46 @@ pnpm-lock.yaml
 dist/
 dist-ssr/
 build/
-*.local
 
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# ---------------------------------------
+# DOCUMENTS / DATA
+# ---------------------------------------
+uploads/
+temp/
+*.db
+*.sqlite
+*.sqlite3
 
-# IDE and Editor files
+# ---------------------------------------
+# EDITOR / IDE FILES
+# ---------------------------------------
 .vscode/
 !.vscode/extensions.json
 .idea/
 *.swp
 *.swo
 *~
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
-# OS files
+# ---------------------------------------
+# OS / SYSTEM FILES
+# ---------------------------------------
 .DS_Store
 .DS_Store?
 ._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 .Spotlight-V100
 .Trashes
-ehthumbs.db
-Thumbs.db
-Desktop.ini
 
-# Logs
-logs/
-*.log
-
-# Temporary files
-*.tmp
-*.temp
-*.bak
-*.backup
-
-# Database files (if any)
-*.db
-*.sqlite
-*.sqlite3
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# pyenv
-.python-version
-
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# Project-specific
+# ---------------------------------------
+# PROJECT SPECIFIC
+# ---------------------------------------
 test_files/
 *.test.json
 *.test.csv
-
-.DS_Store
