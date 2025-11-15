@@ -11,15 +11,18 @@ import {
   Database,
   Image,
   Video,
-  FileText
+  FileText,
+  Play
 } from 'lucide-react'
-import { getVisualizationData, searchFiles, downloadFile } from '../services/api'
+import { getVisualizationData, searchFiles, downloadFile, searchVideos } from '../services/api'
 
 const VisualizationPage = ({ onNavigate }) => {
   const [fileTree, setFileTree] = useState(null)
   const [expandedFolders, setExpandedFolders] = useState(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
+  const [videoSearchQuery, setVideoSearchQuery] = useState('')
+  const [videoSearchResults, setVideoSearchResults] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -115,6 +118,46 @@ const VisualizationPage = ({ onNavigate }) => {
     } catch (err) {
       console.error('Search failed:', err)
       setError('Search failed')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleVideoSearch = async (description) => {
+    if (!description.trim()) {
+      setVideoSearchResults([])
+      return
+    }
+
+    try {
+      setIsLoading(true)
+      // TODO: Replace with real API call when backend is ready
+      // const results = await searchVideos(description)
+      // setVideoSearchResults(results)
+      
+      // Mock video search results for now
+      const mockResults = [
+        { 
+          path: 'Media/video1.mp4', 
+          name: 'video1.mp4', 
+          type: 'video',
+          description: 'A video showing nature scenes',
+          duration: '2:34',
+          thumbnail: null
+        },
+        { 
+          path: 'Media/video2.mp4', 
+          name: 'video2.mp4', 
+          type: 'video',
+          description: 'A tutorial video about coding',
+          duration: '5:12',
+          thumbnail: null
+        }
+      ]
+      setVideoSearchResults(mockResults)
+    } catch (err) {
+      console.error('Video search failed:', err)
+      setError('Video search failed')
     } finally {
       setIsLoading(false)
     }
@@ -310,11 +353,169 @@ const VisualizationPage = ({ onNavigate }) => {
           </motion.div>
         )}
 
+        {/* Video Search Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="mt-12 mb-8"
+        >
+          <div className="text-center mb-6">
+            <div className="flex items-center justify-center gap-2 mb-4">
+              <Play className="w-8 h-8 text-purple-400" />
+              <h2 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent p-1">
+                Video Search
+              </h2>
+            </div>
+            <p className="text-gray-400">
+              Describe what you're looking for in a video and find it instantly
+            </p>
+          </div>
+
+          {/* Two-column layout: Explanation + Search on left, Results on right */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left Column: Explanation and Search */}
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.5 }}
+              className="glass rounded-xl p-6"
+            >
+              <div className="mb-6">
+                <h3 className="text-xl font-bold mb-4 text-purple-400 flex items-center gap-2">
+                  <Video className="w-6 h-6" />
+                  How It Works
+                </h3>
+                <div className="space-y-3 text-gray-300 text-sm">
+                  <p>
+                    Our AI-powered video search understands natural language descriptions. Simply describe what you're looking for in the video:
+                  </p>
+                  <ul className="list-disc list-inside space-y-2 ml-2 text-gray-400">
+                    <li>Describe the content or scenes you want to find</li>
+                    <li>Mention objects, actions, or concepts in the video</li>
+                    <li>Specify any particular characteristics or themes</li>
+                    <li>Our system will analyze and match your description</li>
+                  </ul>
+                  <p className="text-gray-500 italic">
+                    Example: "A video showing a sunset over mountains with birds flying"
+                  </p>
+                </div>
+              </div>
+              
+              <div className="mt-6">
+                <label className="block text-sm font-semibold text-gray-400 mb-2">
+                  Describe the video you're looking for:
+                </label>
+                <div className="flex flex-col gap-3">
+                  <textarea
+                    value={videoSearchQuery}
+                    onChange={(e) => {
+                      setVideoSearchQuery(e.target.value)
+                    }}
+                    placeholder="e.g., A video showing nature scenes with waterfalls..."
+                    rows="4"
+                    className="w-full bg-black/50 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-400/50 resize-none"
+                  />
+                  <motion.button
+                    onClick={() => handleVideoSearch(videoSearchQuery)}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    disabled={!videoSearchQuery.trim() || isLoading}
+                    className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold rounded-lg hover:shadow-lg hover:shadow-purple-500/50 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Search className="w-5 h-5" />
+                    {isLoading ? 'Searching...' : 'Search Videos'}
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Right Column: Results */}
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.6 }}
+              className="glass rounded-xl p-6"
+            >
+              <h3 className="text-xl font-bold mb-4 text-purple-400 flex items-center gap-2">
+                <Search className="w-6 h-6" />
+                Search Results
+              </h3>
+              
+              {videoSearchQuery ? (
+                videoSearchResults.length > 0 ? (
+                  <div className="space-y-4">
+                    {videoSearchResults.map((result, index) => (
+                      <motion.div
+                        key={index}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.1 }}
+                        className="p-4 bg-black/40 rounded-lg hover:bg-black/60 transition-colors border border-gray-700 hover:border-purple-500/50"
+                      >
+                        <div className="flex items-start gap-4">
+                          <div className="flex-shrink-0 w-24 h-16 bg-purple-900/30 rounded flex items-center justify-center">
+                            {result.thumbnail ? (
+                              <img 
+                                src={result.thumbnail} 
+                                alt={result.name}
+                                className="w-full h-full object-cover rounded"
+                              />
+                            ) : (
+                              <Video className="w-8 h-8 text-purple-400" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2 mb-2">
+                              <h4 className="text-white font-semibold truncate">{result.name}</h4>
+                              {result.duration && (
+                                <span className="text-xs text-gray-400 bg-black/50 px-2 py-1 rounded flex-shrink-0">
+                                  {result.duration}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-400 mb-2 line-clamp-2">
+                              {result.description || 'No description available'}
+                            </p>
+                            <p className="text-xs text-gray-500 truncate">{result.path}</p>
+                            <div className="flex items-center gap-2 mt-3">
+                              <motion.button
+                                onClick={() => handleDownload(result.path)}
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                className="px-3 py-1.5 bg-purple-600/20 text-purple-400 text-xs font-medium rounded hover:bg-purple-600/30 transition-colors flex items-center gap-1"
+                              >
+                                <Download className="w-3 h-3" />
+                                Download
+                              </motion.button>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 text-gray-400">
+                    <Video className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                    <p>No videos found matching your description.</p>
+                    <p className="text-sm text-gray-500 mt-2">Try a different description or check your search terms.</p>
+                  </div>
+                )
+              ) : (
+                <div className="text-center py-12 text-gray-500">
+                  <Search className="w-16 h-16 mx-auto mb-4 opacity-30" />
+                  <p>Enter a video description to see results here</p>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        </motion.div>
+
         {/* Note about endpoints */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
+          transition={{ delay: 0.7 }}
           className="glass rounded-xl p-4 mt-6 bg-blue-900/20 border border-blue-500/30"
         >
           <p className="text-sm text-blue-300">
@@ -323,6 +524,8 @@ const VisualizationPage = ({ onNavigate }) => {
             <code className="bg-black/50 px-2 py-1 rounded">GET /api/visualization</code> - Get file tree structure
             <br />
             <code className="bg-black/50 px-2 py-1 rounded">GET /api/search?q=query</code> - Search files
+            <br />
+            <code className="bg-black/50 px-2 py-1 rounded">GET /api/search/videos?description=text</code> - Search videos by description
             <br />
             <code className="bg-black/50 px-2 py-1 rounded">GET /api/download?path=filepath</code> - Download file
           </p>

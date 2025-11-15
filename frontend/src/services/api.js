@@ -1,5 +1,5 @@
 /**
- * API Service for AURAverse
+ * API Service for Clustro
  * 
  * This file contains all API endpoints for communicating with the backend.
  * Update the BASE_URL to match your backend server URL.
@@ -129,6 +129,30 @@ export const getStats = async () => {
 }
 
 /**
+ * Get performance comparison statistics (Real-World vs Clustro)
+ * @returns {Promise<Object>} - Comparison data with time series graphs
+ */
+export const getComparisonStats = async () => {
+  try {
+    const response = await fetch(`${BASE_URL}/stats/comparison`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Error fetching comparison stats:', error)
+    throw error
+  }
+}
+
+/**
  * Get file tree structure for visualization
  * @returns {Promise<Object>} - File tree structure with folders and files
  */
@@ -173,6 +197,31 @@ export const searchFiles = async (query) => {
     return await response.json()
   } catch (error) {
     console.error('Error searching files:', error)
+    throw error
+  }
+}
+
+/**
+ * Search videos by description
+ * @param {string} description - Natural language description of the video content
+ * @returns {Promise<Array>} - Array of video search results
+ */
+export const searchVideos = async (description) => {
+  try {
+    const response = await fetch(`${BASE_URL}/search/videos?description=${encodeURIComponent(description)}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Error searching videos:', error)
     throw error
   }
 }

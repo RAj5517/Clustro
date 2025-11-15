@@ -52,25 +52,17 @@ const Hero = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.7, duration: 0.8 }}
-            className="flex flex-col sm:flex-row gap-4 justify-center items-center"
+            className="flex justify-center items-center"
           >
-            <motion.a
-              href="#how-it-works"
+            <motion.button
+              onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'upload' }))}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               className="px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold rounded-lg shadow-lg hover:shadow-purple-500/50 transition-all duration-300 flex items-center gap-2 group"
             >
               Get Started
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-            </motion.a>
-            <motion.a
-              href="#main-content"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="px-8 py-4 glass text-white font-semibold rounded-lg hover:bg-gray-800/50 transition-all duration-300"
-            >
-              Try It Now
-            </motion.a>
+            </motion.button>
           </motion.div>
         </motion.div>
       </div>

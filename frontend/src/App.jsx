@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import Navigation from './components/Navigation'
+import HomePage from './pages/HomePage'
 import UploadPage from './pages/UploadPage'
 import StatsPage from './pages/StatsPage'
 import VisualizationPage from './pages/VisualizationPage'
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('upload')
+  const [currentPage, setCurrentPage] = useState('home')
 
   const handleNavigate = (page) => {
     setCurrentPage(page)
@@ -13,6 +14,8 @@ function App() {
 
   const renderPage = () => {
     switch (currentPage) {
+      case 'home':
+        return <HomePage onNavigate={handleNavigate} />
       case 'upload':
         return <UploadPage onNavigate={handleNavigate} />
       case 'stats':
@@ -20,7 +23,7 @@ function App() {
       case 'visualization':
         return <VisualizationPage onNavigate={handleNavigate} />
       default:
-        return <UploadPage onNavigate={handleNavigate} />
+        return <HomePage onNavigate={handleNavigate} />
     }
   }
 

@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import DataInput from '../components/DataInput'
-import Hero from '../components/Hero'
-import HowItWorks from '../components/HowItWorks'
 import { uploadData } from '../services/api'
 import { Sparkles } from 'lucide-react'
 
@@ -32,38 +30,27 @@ const UploadPage = ({ onNavigate }) => {
   }
 
   return (
-    <div className="min-h-screen">
-      {/* Hero Section */}
-      <Hero />
-
-      {/* How It Works Section */}
-      <div id="how-it-works">
-        <HowItWorks />
-      </div>
-
-      {/* Upload Section */}
-      <div id="main-content" className="p-4 md:p-8">
+    <div className="min-h-screen p-4 md:p-8">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="max-w-7xl mx-auto"
+      >
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="max-w-7xl mx-auto"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center mb-12"
         >
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-12"
-          >
-            <div className="flex items-center justify-center gap-2 mb-4">
-              <Sparkles className="w-8 h-8 text-purple-400" />
-              <h2 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent p-1">
-                Try It Now
-              </h2>
-            </div>
-            <p className="text-gray-400">
-              Upload your files or folders and let the intelligent system process them
-            </p>
-          </motion.div>
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <Sparkles className="w-8 h-8 text-purple-400" />
+            <h2 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent p-1">
+              Upload Data
+            </h2>
+          </div>
+          <p className="text-gray-400">
+            Upload your files or folders and let the intelligent system process them
+          </p>
+        </motion.div>
 
           {error && (
             <motion.div
@@ -75,9 +62,9 @@ const UploadPage = ({ onNavigate }) => {
             </motion.div>
           )}
 
-          <div className="grid grid-cols-1 gap-6 mb-16">
-            <DataInput onDataSubmit={handleDataSubmit} />
-          </div>
+        <div className="grid grid-cols-1 gap-6 mb-16">
+          <DataInput onDataSubmit={handleDataSubmit} />
+        </div>
 
         {/* Live Update Indicator */}
         {newSubmission && (
@@ -104,8 +91,7 @@ const UploadPage = ({ onNavigate }) => {
             </div>
           </motion.div>
         )}
-        </motion.div>
-      </div>
+      </motion.div>
     </div>
   )
 }

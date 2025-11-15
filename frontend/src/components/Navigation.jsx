@@ -1,8 +1,9 @@
 import { motion } from 'framer-motion'
-import { Upload, BarChart3, FolderTree, Sparkles } from 'lucide-react'
+import { Home, Upload, BarChart3, FolderTree, Sparkles } from 'lucide-react'
 
 const Navigation = ({ currentPage, onNavigate }) => {
   const navItems = [
+    { id: 'home', label: 'Home', icon: Home },
     { id: 'upload', label: 'Upload', icon: Upload },
     { id: 'stats', label: 'Statistics', icon: BarChart3 },
     { id: 'visualization', label: 'Visualization', icon: FolderTree }
@@ -24,7 +25,7 @@ const Navigation = ({ currentPage, onNavigate }) => {
             <Sparkles className="w-6 h-6 text-purple-400" />
           </motion.div>
           <span className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-            AURAverse
+            Clustro
           </span>
         </motion.div>
 
