@@ -9,7 +9,7 @@ The classification system:
 2. **Separates** media files from non-media files
 3. **Classifies** non-media files as SQL or NoSQL
 4. **Routes** files to appropriate processors:
-   - SQL files → Schema Generator → Schema Executor
+   - SQL files → (disabled - schema generator removed)
    - NoSQL files → NoSQL processing (placeholder)
    - Media files → Multimodal Pipeline (placeholder)
 
@@ -20,9 +20,7 @@ Backend/
 ├── classification/
 │   ├── main.py          # Main entry point (THIS FILE)
 │   └── README.md        # This documentation
-├── Schema_generator/    # SQL processing
-│   ├── schema_generator.py
-│   ├── schema_executor.py
+(SQL pipeline removed - legacy Schema_generator module no longer included)
 │   └── file_classifier.py
 ├── CLIP_Model/          # Media processing
 │   └── multimodal_pipeline.py
@@ -181,23 +179,12 @@ Currently initialized but not fully implemented. Future implementation should:
 
 ## Configuration
 
-The processor uses `Schema_generator/config.py` for database configuration. Set environment variables:
-
-```bash
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=clustro
-DB_USER=postgres
-DB_PASSWORD=your_password
-```
-
-Or use `.env` file in the Backend directory.
+SQL schema processing has been removed, so no database configuration is required.
 
 ## Dependencies
 
 - `file_classifier.py` - SQL/NoSQL classification
-- `Schema_generator/` - SQL schema generation and execution
+- (Removed) SQL schema generation and execution
 - `CLIP_Model/multimodal_pipeline.py` - Media processing (optional)
 
 See `requirements.txt` in the Backend directory for all dependencies.
-

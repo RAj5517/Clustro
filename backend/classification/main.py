@@ -17,15 +17,24 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 import tempfile
 import shutil
+import logging
+
+# Configure logging if not already configured
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
+
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import components
 from file_classifier import FileClassifier
-from Schema_generator.config import get_db_config
-from Schema_generator.schema_generator import generate_schema
-from Schema_generator.schema_executor import execute_pending_jobs
+from sql_pipeline_stub import get_db_config, generate_schema, execute_pending_jobs
+from nosql_ingestion_pipeline import NoSQLIngestionPipeline
 
 # Import multimodal pipeline (will be used for media files)
 try:
@@ -64,6 +73,15 @@ class ClassificationProcessor:
             except Exception as e:
                 print(f"[WARNING] Could not initialize multimodal pipeline: {e}")
                 self.multimodal_pipeline = None
+
+        # Initialize NoSQL ingestion pipeline (routes NoSQL assets to Mongo/Chroma)
+        self.nosql_pipeline = None
+        try:
+            self.nosql_pipeline = NoSQLIngestionPipeline(multimodal_pipeline=self.multimodal_pipeline)
+            print("[OK] NoSQL ingestion pipeline initialized")
+        except Exception as e:
+            print(f"[WARNING] Could not initialize NoSQL ingestion pipeline: {e}")
+            self.nosql_pipeline = None
     
     def is_media_file(self, file_path: str) -> bool:
         """Check if a file is a media file based on extension."""
@@ -83,6 +101,7 @@ class ClassificationProcessor:
         """
         # Save uploaded files to temporary directory
         temp_dir = tempfile.mkdtemp(prefix='clustro_upload_')
+        logger.info("process_upload: received %d files with metadata length %d", len(files), len(metadata or ""))
         
         try:
             # Save all files to temp directory
@@ -106,6 +125,7 @@ class ClassificationProcessor:
             
             # Process all files
             results = self.process_files(saved_files, metadata)
+            logger.info("process_upload: completed processing %d files", len(saved_files))
             
             return results
             
@@ -114,7 +134,7 @@ class ClassificationProcessor:
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception:
-                pass
+                logger.warning("process_upload: failed to remove temp dir %s", temp_dir, exc_info=True)
     
     def process_files(self, file_paths: List[Path], metadata: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -127,6 +147,7 @@ class ClassificationProcessor:
         Returns:
             Dictionary with processing results
         """
+        logger.info("process_files: starting with %d paths", len(file_paths))
         # Separate media and non-media files
         media_files = []
         non_media_files = []
@@ -156,21 +177,31 @@ class ClassificationProcessor:
             'errors': []
         }
         
+        logger.info(
+            "process_files: detected %d media and %d non-media files",
+            len(media_files),
+            len(non_media_files)
+        )
         # Process non-media files
         if non_media_files:
-            print(f"[INFO] Processing {len(non_media_files)} non-media files...")
-            non_media_results = self._process_non_media_files(non_media_files)
+            logger.info("process_files: processing %d non-media files", len(non_media_files))
+            non_media_results = self._process_non_media_files(non_media_files, metadata)
             results['non_media_results'] = non_media_results
         
         # Process media files (placeholder for now)
         if media_files:
-            print(f"[INFO] Processing {len(media_files)} media files...")
-            media_results = self._process_media_files(media_files)
+            logger.info("process_files: processing %d media files", len(media_files))
+            media_results = self._process_media_files(media_files, metadata)
             results['media_results'] = media_results
+        
+        logger.info(
+            "process_files: completed with %d total results",
+            len(results['non_media_results']) + len(results['media_results'])
+        )
         
         return results
     
-    def _process_non_media_files(self, file_paths: List[Path]) -> List[Dict[str, Any]]:
+    def _process_non_media_files(self, file_paths: List[Path], metadata: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Process non-media files through classifier and route to SQL/NoSQL.
         
@@ -180,8 +211,8 @@ class ClassificationProcessor:
         Returns:
             List of processing results for each file
         """
+        logger.info("_process_non_media_files: handling %d files", len(file_paths))
         results = []
-        sql_files = []
         
         for file_path in file_paths:
             file_result = {
@@ -196,76 +227,44 @@ class ClassificationProcessor:
             try:
                 # Classify file as SQL or NoSQL
                 classification_result = self.classifier.classify(str(file_path))
+                logger.info(
+                    "Classified %s as %s (SQL score %.3f, NoSQL score %.3f)",
+                    file_path.name,
+                    classification_result['classification'],
+                    classification_result.get('sql_score', 0),
+                    classification_result.get('nosql_score', 0)
+                )
                 file_result['classification'] = classification_result['classification']
                 file_result['sql_score'] = classification_result.get('sql_score', 0)
                 file_result['nosql_score'] = classification_result.get('nosql_score', 0)
                 file_result['reasons'] = classification_result.get('reasons', [])
                 
                 if classification_result['classification'] == 'SQL':
-                    # Route to schema generator and executor
-                    sql_files.append((file_path, file_result))
+                    # SQL processing disabled - capture placeholder response
+                    logger.info("Routing %s to SQL placeholder handler", file_path.name)
+                    file_result['sql_result'] = self._handle_sql_file_placeholder(file_path)
                 else:
-                    # Route to NoSQL processing (placeholder for now)
-                    file_result['nosql_result'] = {
-                        'status': 'pending',
-                        'message': 'NoSQL processing will be implemented here',
-                        'note': 'Placeholder for NoSQL document storage (MongoDB, DynamoDB, etc.)'
-                    }
+                    # Route to NoSQL processing pipeline
+                    logger.info("Routing %s to NoSQL pipeline", file_path.name)
+                    file_result['nosql_result'] = self._route_to_nosql_pipeline(
+                        file_path=file_path,
+                        classification_result=classification_result,
+                        metadata=metadata,
+                        modality_hint='text'
+                    )
                 
             except Exception as e:
                 file_result['error'] = str(e)
+                logger.exception("Failed processing non-media file %s", file_path)
                 results.append(file_result)
                 continue
             
             results.append(file_result)
         
-        # Process SQL files through schema generator and executor
-        if sql_files:
-            print(f"[INFO] Processing {len(sql_files)} SQL files through schema generator...")
-            for file_path, file_result in sql_files:
-                try:
-                    print(f"[INFO] Generating schema for: {file_path.name}")
-                    # Generate schema
-                    schema_result = generate_schema(str(file_path), self.db_config)
-                    
-                    print(f"[INFO] Schema generation result: success={schema_result.get('success')}, "
-                          f"tables={len(schema_result.get('tables', []))}, "
-                          f"jobs_created={schema_result.get('jobs_created', 0)}")
-                    
-                    if schema_result.get('errors'):
-                        print(f"[WARNING] Schema generation errors: {schema_result.get('errors')}")
-                    
-                    file_result['sql_result'] = {
-                        'schema_generation': schema_result,
-                        'tables': schema_result.get('tables', []),
-                        'jobs_created': schema_result.get('jobs_created', 0)
-                    }
-                    
-                    # Execute pending jobs if any were created
-                    jobs_created = schema_result.get('jobs_created', 0)
-                    if jobs_created > 0:
-                        print(f"[INFO] Executing {jobs_created} pending jobs...")
-                        executor_result = execute_pending_jobs(self.db_config, stop_on_error=False)
-                        print(f"[INFO] Execution complete: completed={executor_result.get('completed', 0)}, "
-                              f"failed={executor_result.get('failed', 0)}")
-                        file_result['sql_result']['execution'] = executor_result
-                    else:
-                        print(f"[WARNING] No jobs created for {file_path.name}. Check if table already exists or schema generation failed.")
-                        
-                except Exception as e:
-                    import traceback
-                    error_trace = traceback.format_exc()
-                    print(f"[ERROR] Error processing {file_path.name}: {e}")
-                    print(f"[ERROR] Traceback: {error_trace}")
-                    file_result['error'] = str(e) if not file_result.get('error') else file_result['error']
-                    file_result['sql_result'] = {
-                        'error': str(e),
-                        'status': 'failed'
-                    }
-        
+        logger.info("_process_non_media_files: completed %d items", len(results))
         return results
     
-    def _process_media_files(self, file_paths: List[Path]) -> List[Dict[str, Any]]:
+    def _process_media_files(self, file_paths: List[Path], metadata: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Process media files through multimodal pipeline (placeholder for now).
         
@@ -275,39 +274,66 @@ class ClassificationProcessor:
         Returns:
             List of processing results for each file
         """
+        logger.info("_process_media_files: handling %d files", len(file_paths))
         results = []
         
         for file_path in file_paths:
+            file_type = self._get_media_type(str(file_path))
+            logger.info("Detected media file %s of type %s", file_path.name, file_type)
             file_result = {
                 'file': str(file_path),
                 'file_name': file_path.name,
-                'file_type': self._get_media_type(str(file_path)),
+                'file_type': file_type,
                 'status': 'pending',
                 'result': None,
-                'error': None
+                'error': None,
+                'nosql_result': None
             }
-            
-            if self.multimodal_pipeline:
-                try:
-                    # Process through multimodal pipeline
-                    # TODO: Implement actual processing when ready
-                    file_result['status'] = 'pending'
-                    file_result['result'] = {
-                        'message': 'Media processing through multimodal pipeline will be implemented here',
-                        'note': 'Placeholder for CLIP embedding generation and captioning'
-                    }
-                except Exception as e:
-                    file_result['error'] = str(e)
-                    file_result['status'] = 'error'
-            else:
+
+            classification_stub = {
+                'classification': 'NoSQL',
+                'reason': 'Media assets are routed to the NoSQL ingestion pipeline',
+                'modality': file_type
+            }
+
+            nosql_result = self._route_to_nosql_pipeline(
+                file_path=file_path,
+                classification_result=classification_stub,
+                metadata=metadata,
+                modality_hint=file_type
+            )
+            file_result['nosql_result'] = nosql_result
+
+            if not nosql_result or nosql_result.get('status') == 'pending':
+                file_result['result'] = {
+                    'message': 'Media file queued for NoSQL ingestion',
+                    'modality': file_type
+                }
+            elif nosql_result.get('status') == 'completed':
+                file_result['status'] = 'completed'
+                file_result['result'] = {
+                    'message': 'Media file embedded and stored via NoSQL pipeline',
+                    'modality': file_type,
+                    'file_id': nosql_result.get('file_id'),
+                    'graph_nodes': nosql_result.get('graph_nodes', [])
+                }
+            elif nosql_result.get('status') == 'skipped':
                 file_result['status'] = 'skipped'
                 file_result['result'] = {
-                    'message': 'Multimodal pipeline not available',
-                    'note': 'CLIP_Model not initialized or not available'
+                    'message': 'NoSQL pipeline skipped media processing',
+                    'note': nosql_result.get('error') or 'Pipeline disabled'
+                }
+            else:
+                file_result['status'] = 'error'
+                file_result['error'] = nosql_result.get('error', 'Unknown media processing error')
+                file_result['result'] = {
+                    'message': 'Media file failed to process via NoSQL pipeline',
+                    'modality': file_type
                 }
             
             results.append(file_result)
         
+        logger.info("_process_media_files: completed %d items", len(results))
         return results
     
     def _get_media_type(self, file_path: str) -> str:
@@ -322,6 +348,69 @@ class ClassificationProcessor:
             return 'audio'
         else:
             return 'unknown'
+
+    def _handle_sql_file_placeholder(self, file_path: Path) -> Dict[str, Any]:
+        """
+        Return a placeholder response for SQL files now that the schema generator
+        has been removed.
+        """
+        logger.info("SQL placeholder invoked for %s", file_path.name)
+        schema_result = generate_schema(str(file_path), self.db_config)
+        execution_result = execute_pending_jobs(self.db_config)
+        return {
+            'status': 'disabled',
+            'message': 'SQL schema processing has been removed from this deployment.',
+            'schema_generation': schema_result,
+            'execution': execution_result
+        }
+
+    def _route_to_nosql_pipeline(
+        self,
+        file_path: Path,
+        classification_result: Dict[str, Any],
+        metadata: Optional[str],
+        modality_hint: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Invoke the NoSQL ingestion pipeline for the provided file.
+        """
+        if not self.nosql_pipeline:
+            logger.warning("NoSQL pipeline unavailable when routing %s", file_path.name)
+            return {
+                'status': 'skipped',
+                'error': 'NoSQL ingestion pipeline is not available'
+            }
+
+        ingest_metadata = {
+            'tenant_id': classification_result.get('tenant_id'),
+            'metadata_text': metadata,
+            'source': 'classification_processor'
+        }
+
+        try:
+            logger.info(
+                "Routing %s to NoSQL ingestion (modality=%s)",
+                file_path.name,
+                modality_hint or 'unknown'
+            )
+            result = self.nosql_pipeline.process_file(
+                file_path=file_path,
+                classification_result=classification_result,
+                metadata=ingest_metadata,
+                modality_hint=modality_hint
+            )
+            logger.info(
+                "NoSQL ingestion result for %s: status=%s",
+                file_path.name,
+                result.get('status')
+            )
+            return result
+        except Exception as exc:
+            logger.exception("NoSQL pipeline failed for %s", file_path.name)
+            return {
+                'status': 'error',
+                'error': str(exc)
+            }
 
 
 def process_upload_request(files: List[Any], metadata: Optional[str] = None) -> Dict[str, Any]:

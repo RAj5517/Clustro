@@ -1,6 +1,3 @@
-# PostgreSQL database driver
-psycopg2-binary>=2.9.0
-
 # Environment variable management
 python-dotenv>=1.0.0
 
@@ -31,7 +28,13 @@ transformers
 accelerate
 sentencepiece
 
+# NoSQL + embedding helpers
+pymongo>=4.6.0
+keybert>=0.8.3
+
 # Optional (if you want ffmpeg; pip version)
 ffmpeg-python
 chromadb
 protobuf<5.0.0
+
+google-generativeai
