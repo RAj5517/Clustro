@@ -192,10 +192,8 @@ class NoSQLIngestionPipeline:
         result = NoSQLProcessingResult(status="pending", modality=modality, metadata=extra_payload)
 
         if not self.multimodal_pipeline:
-            result.status = "skipped"
-            result.error = "CLIP multimodal pipeline unavailable"
-            logger.warning("Media pipeline: CLIP unavailable, skipping %s", path)
-            return result
+            logger.warning("Media pipeline: CLIP unavailable, storing %s with fallback", path)
+            return self._fallback_media_ingest(path, modality, tenant_id, extra_payload)
 
         try:
             info = self.multimodal_pipeline.encode_path(str(path))
@@ -257,6 +255,64 @@ class NoSQLIngestionPipeline:
             )
         except Exception as exc:  # pragma: no cover - db failures
             logger.exception("Failed to persist media file %s", path)
+            result.status = "error"
+            result.error = str(exc)
+
+        return result
+
+    def _fallback_media_ingest(
+        self,
+        path: Path,
+        modality: str,
+        tenant_id: str,
+        extra_payload: Dict[str, Any],
+    ) -> NoSQLProcessingResult:
+        """Persist media metadata even when the CLIP pipeline is unavailable."""
+        result = NoSQLProcessingResult(status="pending", modality=modality, metadata=extra_payload)
+        summary = f"{modality.title()} file {path.name}"
+        collection = "media_assets"
+        plan = self._resolve_path_plan(summary, path)
+
+        try:
+            meta_doc = meta_generator(
+                file_path=str(path),
+                tenant_id=tenant_id,
+                summary=summary,
+                collection=collection,
+                nosql_db=self.nosql_db,
+                storage_uri=plan.path if plan else None,
+                extra={**extra_payload, "modality": modality, "clip_status": "unavailable"},
+            )
+
+            chunk_texts = simple_character_chunker(summary)
+            chunk_count = chunk_generator(
+                file_path=str(path),
+                file_id=meta_doc["_id"],
+                tenant_id=tenant_id,
+                collection=collection,
+                nosql_db=self.nosql_db,
+                text_override=summary,
+            )
+
+            graph_nodes = self._write_embeddings(
+                file_id=meta_doc["_id"],
+                summary=summary,
+                chunk_texts=chunk_texts,
+                modality=modality,
+                collection=collection,
+                file_path=str(path),
+            )
+
+            result.status = "completed"
+            result.file_id = meta_doc["_id"]
+            result.collection = collection
+            result.chunk_count = chunk_count
+            result.storage_plan = plan.payload if plan else None
+            result.graph_nodes = graph_nodes
+            result.mongo_collections = {"files": "files", "chunks": collection}
+            logger.info("Fallback media ingest stored %s as %s", path, collection)
+        except Exception as exc:
+            logger.exception("Fallback media ingest failed for %s", path)
             result.status = "error"
             result.error = str(exc)
 
@@ -353,6 +409,7 @@ class NoSQLIngestionPipeline:
                         "chunk_index": idx,
                         "modality": modality,
                         "collection": collection,
+                        "path": file_path,
                     },
                 }
             )

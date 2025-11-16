@@ -260,3 +260,29 @@ export const downloadFile = async (filePath) => {
   }
 }
 
+/**
+ * Perform semantic search using CLIP embeddings stored in the backend
+ * @param {string} query - Natural language search query
+ * @param {number} limit - Max number of results to return
+ * @returns {Promise<Object>} - Semantic search response
+ */
+export const semanticSearch = async (query, limit = 10) => {
+  try {
+    const response = await fetch(`${BASE_URL}/search/semantic`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query, limit }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Error performing semantic search:', error)
+    throw error
+  }
+}

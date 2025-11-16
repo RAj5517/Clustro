@@ -74,6 +74,52 @@ class GraphEmbeddingWriter:
         )
         return ids
 
+    def query_similar(self, embedding: List[float], limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Retrieve the nearest neighbours for the provided embedding from ChromaDB.
+        """
+        if not self.available or not embedding:
+            return []
+
+        try:
+            query = self._collection.query(
+                query_embeddings=[embedding],
+                n_results=limit,
+                include=["metadatas", "documents", "distances", "ids"],
+            )
+        except Exception as exc:  # pragma: no cover - db runtime errors
+            logger.warning("Graph query failed: %s", exc)
+            return []
+
+        ids = query.get("ids", [[]])[0]
+        distances = query.get("distances", [[]])[0]
+        documents = query.get("documents", [[]])[0]
+        metadatas = query.get("metadatas", [[]])[0]
+
+        results: List[Dict[str, Any]] = []
+        for idx, node_id in enumerate(ids):
+            metadata = metadatas[idx] if idx < len(metadatas) else {}
+            document = documents[idx] if idx < len(documents) else ""
+            distance = distances[idx] if idx < len(distances) else None
+            similarity = None
+            if distance is not None:
+                try:
+                    similarity = max(0.0, 1.0 - float(distance))
+                except Exception:
+                    similarity = None
+
+            results.append(
+                {
+                    "id": node_id,
+                    "distance": distance,
+                    "similarity": similarity,
+                    "text": document,
+                    "metadata": metadata,
+                }
+            )
+
+        return results
+
     def _sanitize_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
         sanitized: Dict[str, Any] = {}
         for key, value in metadata.items():
