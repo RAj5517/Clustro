@@ -10,9 +10,16 @@ import csv
 import xml.etree.ElementTree as ET
 import re
 import mimetypes
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 from collections import Counter
+
+# Add parent directory to path for logger import
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from logger_config import get_logger
+logger = get_logger('auraverse.file_classifier')
 
 # Optional imports for advanced file types
 try:
@@ -49,6 +56,7 @@ class FileClassifier:
         self.sql_score = 0
         self.nosql_score = 0
         self.reasons = []
+        logger.debug("FileClassifier initialized")
     
     def classify(self, file_path: str) -> Dict[str, Any]:
         """
@@ -69,15 +77,20 @@ class FileClassifier:
             }
         """
         file_path = Path(file_path)
+        logger.info(f"Classifying file: {file_path.name}")
         
         if not file_path.exists():
+            logger.error(f"File not found: {file_path}")
             raise FileNotFoundError(f"File not found: {file_path}")
         
         # Detect file type
         self.file_type = self._detect_file_type(file_path)
+        logger.debug(f"Detected file type: {self.file_type}")
         
         # Parse file based on type
+        logger.debug(f"Parsing {self.file_type} file...")
         self.file_content = self._parse_file(file_path)
+        logger.debug(f"File parsed successfully")
         
         # Reset scores
         self.sql_score = 0

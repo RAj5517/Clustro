@@ -15,8 +15,10 @@ from pathlib import Path
 # Add Backend directory to path
 backend_path = Path(__file__).parent
 sys.path.insert(0, str(backend_path))
+sys.path.insert(0, str(backend_path / 'sql'))
 
-from Schema_generator.config import get_db_config
+# Import from sql folder
+from config import get_db_config
 import psycopg2
 from psycopg2 import sql
 
