@@ -8,14 +8,48 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from nosql_processor.main import (
-    chunk_generator,
-    extract_full_text,
-    get_nosql_db,
-    infer_collection,
-    meta_generator,
-    simple_character_chunker,
-)
+try:
+    from nosql_processor.main import (
+        chunk_generator,
+        extract_full_text,
+        get_nosql_db,
+        infer_collection,
+        meta_generator,
+        simple_character_chunker,
+    )
+    HAS_NOSQL_PROCESSOR = True
+except ImportError as exc:
+    HAS_NOSQL_PROCESSOR = False
+    logger.warning("nosql_processor.main not available: %s", exc)
+    # Define stub functions for graceful degradation
+    def get_nosql_db(*args, **kwargs):
+        return None
+    def extract_full_text(path: str) -> str:
+        try:
+            return Path(path).read_text(encoding='utf-8', errors='ignore')
+        except Exception:
+            return ""
+    def simple_character_chunker(text: str, chunk_size: int = 1000, overlap: int = 200):
+        if not text:
+            return []
+        if len(text) <= chunk_size:
+            return [text]
+        chunks = []
+        start = 0
+        while start < len(text):
+            end = start + chunk_size
+            chunks.append(text[start:end])
+            if end >= len(text):
+                break
+            start = end - overlap
+        return chunks
+    def infer_collection(text: str) -> str:
+        return "general"
+    def meta_generator(*args, **kwargs):
+        import uuid
+        return {"_id": str(uuid.uuid4())}
+    def chunk_generator(*args, **kwargs):
+        return 0
 
 from .config import NoSQLPipelineConfig, load_config
 from .graph_writer import GraphEmbeddingWriter
@@ -63,7 +97,9 @@ class NoSQLIngestionPipeline:
         multimodal_pipeline: Any = None,
     ):
         self.config = config or load_config()
-        self.nosql_db = get_nosql_db(self.config.mongo_uri, self.config.mongo_db)
+        if not HAS_NOSQL_PROCESSOR:
+            logger.warning("NoSQL processor unavailable - MongoDB operations will be disabled")
+        self.nosql_db = get_nosql_db(self.config.mongo_uri, self.config.mongo_db) if HAS_NOSQL_PROCESSOR else None
         self.graph_writer = GraphEmbeddingWriter(
             persist_path=self.config.chroma_path,
             collection_name=self.config.chroma_collection,

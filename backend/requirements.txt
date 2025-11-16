@@ -1,32 +1,17 @@
-# Environment variable management
-python-dotenv>=1.0.0
+# ============================================
+# REQUIRED - Core Dependencies
+# ============================================
 
-# Core parsing libraries
-pandas>=2.0.0
-PyYAML>=6.0
-python-docx>=1.0.0
-PyPDF2>=3.0.0
-openpyxl>=3.1.0
-beautifulsoup4>=4.12.0
-lxml>=4.9.0
+# PostgreSQL database driver (REQUIRED)
+psycopg2-binary>=2.9.0
 
-# Flask API server
+# Flask API server (REQUIRED)
 Flask>=2.3.0
 flask-cors>=4.0.0
 Werkzeug>=2.3.0
 
-# Machine Learning / AI models
-torch
-torchvision
-torchaudio
-open_clip_torch
-pillow
-opencv-python
-numpy
-openai-whisper
-transformers
-accelerate
-sentencepiece
+# Environment variable management (RECOMMENDED)
+python-dotenv>=1.0.0
 
 # NoSQL + embedding helpers
 pymongo>=4.6.0
@@ -38,3 +23,43 @@ chromadb
 protobuf<5.0.0
 
 google-generativeai
+
+# ============================================
+# OPTIONAL - File Parsing Libraries
+# Install these for specific file format support
+# ============================================
+
+# CSV/Excel processing (RECOMMENDED for CSV/Excel files)
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# YAML files (OPTIONAL - only if processing YAML files)
+PyYAML>=6.0
+
+# Word documents (OPTIONAL - only if processing .docx files)
+python-docx>=1.0.0
+
+# PDF files (OPTIONAL - only if processing PDF files)
+PyPDF2>=3.0.0
+
+# HTML parsing (OPTIONAL - only if processing HTML files)
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# ============================================
+# OPTIONAL - Machine Learning / AI
+# Only needed for media/ML processing features
+# ============================================
+
+# Uncomment below if you need ML/AI features:
+# torch
+# torchvision
+# torchaudio
+# open_clip_torch
+# pillow
+# opencv-python
+# numpy
+# openai-whisper
+# transformers
+# accelerate
+# sentencepiece
