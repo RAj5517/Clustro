@@ -30,11 +30,23 @@ logger = logging.getLogger(__name__)
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'sql'))
 
 # Import components
-from file_classifier import FileClassifier
-from sql_pipeline_stub import get_db_config, generate_schema, execute_pending_jobs
-from nosql_ingestion_pipeline import NoSQLIngestionPipeline
+from sql.file_classifier import FileClassifier
+try:
+    from sql.config import get_db_config
+except ImportError:
+    from sql_pipeline_stub import get_db_config
+
+from sql_pipeline_stub import generate_schema, execute_pending_jobs
+
+# Import NoSQL ingestion pipeline
+try:
+    from nosql_ingestion_pipeline import NoSQLIngestionPipeline
+except ImportError:
+    NoSQLIngestionPipeline = None  # type: ignore
+    logger.warning("NoSQL ingestion pipeline not available - NoSQL processing will be skipped")
 
 # Import multimodal pipeline (will be used for media files)
 try:
@@ -76,12 +88,15 @@ class ClassificationProcessor:
 
         # Initialize NoSQL ingestion pipeline (routes NoSQL assets to Mongo/Chroma)
         self.nosql_pipeline = None
-        try:
-            self.nosql_pipeline = NoSQLIngestionPipeline(multimodal_pipeline=self.multimodal_pipeline)
-            print("[OK] NoSQL ingestion pipeline initialized")
-        except Exception as e:
-            print(f"[WARNING] Could not initialize NoSQL ingestion pipeline: {e}")
-            self.nosql_pipeline = None
+        if NoSQLIngestionPipeline is not None:
+            try:
+                self.nosql_pipeline = NoSQLIngestionPipeline(multimodal_pipeline=self.multimodal_pipeline)
+                logger.info("[OK] NoSQL ingestion pipeline initialized")
+            except Exception as e:
+                logger.warning(f"Could not initialize NoSQL ingestion pipeline: {e}")
+                self.nosql_pipeline = None
+        else:
+            logger.warning("NoSQL ingestion pipeline not available - NoSQL processing disabled")
     
     def is_media_file(self, file_path: str) -> bool:
         """Check if a file is a media file based on extension."""
@@ -373,12 +388,19 @@ class ClassificationProcessor:
     ) -> Dict[str, Any]:
         """
         Invoke the NoSQL ingestion pipeline for the provided file.
+        
+        This handles routing of NoSQL-classified files (including PDFs) to the
+        NoSQL ingestion pipeline for processing and storage.
         """
+        file_ext = file_path.suffix.lower()
+        is_pdf = file_ext == '.pdf'
+        
         if not self.nosql_pipeline:
-            logger.warning("NoSQL pipeline unavailable when routing %s", file_path.name)
+            error_msg = 'NoSQL ingestion pipeline is not available'
+            logger.error("Cannot route %s to NoSQL pipeline: %s", file_path.name, error_msg)
             return {
                 'status': 'skipped',
-                'error': 'NoSQL ingestion pipeline is not available'
+                'error': error_msg
             }
 
         ingest_metadata = {
@@ -388,28 +410,72 @@ class ClassificationProcessor:
         }
 
         try:
+            # Detect modality if not provided
+            if not modality_hint:
+                if is_pdf:
+                    modality_hint = 'text'  # PDFs are processed as text
+                    logger.debug("Detected PDF file, setting modality to 'text' for %s", file_path.name)
+                else:
+                    modality_hint = classification_result.get('modality', 'text')
+            
             logger.info(
-                "Routing %s to NoSQL ingestion (modality=%s)",
+                "Routing %s to NoSQL ingestion (modality=%s, classification=%s)",
                 file_path.name,
-                modality_hint or 'unknown'
+                modality_hint,
+                classification_result.get('classification', 'NoSQL')
             )
+            
+            if is_pdf:
+                logger.info("Processing PDF file: %s", file_path.name)
+            
+            # Process file through NoSQL pipeline
             result = self.nosql_pipeline.process_file(
                 file_path=file_path,
                 classification_result=classification_result,
                 metadata=ingest_metadata,
                 modality_hint=modality_hint
             )
+            
+            status = result.get('status', 'unknown')
             logger.info(
-                "NoSQL ingestion result for %s: status=%s",
+                "NoSQL ingestion completed for %s: status=%s, file_id=%s, collection=%s, chunks=%d",
                 file_path.name,
-                result.get('status')
+                status,
+                result.get('file_id', 'N/A'),
+                result.get('collection', 'N/A'),
+                result.get('chunk_count', 0)
             )
+            
+            if status == 'error':
+                error_msg = result.get('error', 'Unknown error')
+                logger.error("NoSQL ingestion failed for %s: %s", file_path.name, error_msg)
+            elif status == 'completed':
+                logger.info("NoSQL ingestion successful for %s", file_path.name)
+            
             return result
-        except Exception as exc:
-            logger.exception("NoSQL pipeline failed for %s", file_path.name)
+            
+        except FileNotFoundError as fnf_exc:
+            error_msg = f"File not found: {file_path}"
+            logger.error("File not found when routing to NoSQL pipeline: %s - %s", file_path.name, fnf_exc)
             return {
                 'status': 'error',
-                'error': str(exc)
+                'error': error_msg
+            }
+        except ImportError as import_exc:
+            error_msg = f"Required library missing: {str(import_exc)}"
+            logger.error("Import error when routing %s to NoSQL pipeline: %s", file_path.name, import_exc)
+            if is_pdf:
+                logger.error("PDF processing requires PyPDF2. Install with: pip install PyPDF2")
+            return {
+                'status': 'error',
+                'error': error_msg
+            }
+        except Exception as exc:
+            error_msg = f"Unexpected error: {str(exc)}"
+            logger.exception("NoSQL pipeline failed for %s: %s", file_path.name, exc)
+            return {
+                'status': 'error',
+                'error': error_msg
             }
 
 

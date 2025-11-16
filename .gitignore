@@ -119,7 +119,19 @@ Desktop.ini
 # ---------------------------------------
 # PROJECT SPECIFIC
 # ---------------------------------------
+# Storage directory (processed files)
+storage/
+
+# ChromaDB database files
+chroma_db/
+*.sqlite3
+
+# Test files
 test_files/
 *.test.json
 *.test.csv
 test.mp4
+
+# Backend logs
+backend/logs/
+backend/*.log

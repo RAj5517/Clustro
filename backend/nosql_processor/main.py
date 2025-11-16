@@ -71,6 +71,8 @@ def extract_full_text(file_path: str) -> str:
     """
     Extract full text from a file.
     
+    Supports: txt, md, csv, json, xml, yaml, pdf, docx
+    
     Args:
         file_path: Path to the file
         
@@ -80,18 +82,81 @@ def extract_full_text(file_path: str) -> str:
     path = Path(file_path)
     
     if not path.exists():
-        logger.warning("File not found for text extraction: %s", file_path)
+        logger.error("File not found for text extraction: %s", file_path)
         return ""
+    
+    file_ext = path.suffix.lower()
+    logger.info("Extracting text from %s (extension: %s)", file_path, file_ext)
     
     try:
         # Simple text extraction for common formats
-        if path.suffix.lower() in {'.txt', '.md', '.csv', '.json', '.xml', '.yaml', '.yml'}:
-            return path.read_text(encoding='utf-8', errors='ignore')
+        if file_ext in {'.txt', '.md', '.csv', '.json', '.xml', '.yaml', '.yml', '.html', '.htm'}:
+            logger.debug("Reading text file: %s", file_path)
+            text = path.read_text(encoding='utf-8', errors='ignore')
+            logger.info("Extracted %d characters from text file %s", len(text), file_path)
+            return text
         
-        # Try reading as text anyway
-        return path.read_text(encoding='utf-8', errors='ignore')
+        # PDF extraction
+        elif file_ext == '.pdf':
+            logger.info("Attempting PDF text extraction from %s", file_path)
+            try:
+                import PyPDF2
+                logger.debug("PyPDF2 available, extracting PDF text")
+                with open(path, 'rb') as f:
+                    pdf_reader = PyPDF2.PdfReader(f)
+                    logger.debug("PDF has %d pages", len(pdf_reader.pages))
+                    text = ""
+                    for page_num, page in enumerate(pdf_reader.pages, 1):
+                        try:
+                            page_text = page.extract_text()
+                            text += page_text + "\n"
+                            logger.debug("Extracted text from page %d/%d (%d chars)", 
+                                       page_num, len(pdf_reader.pages), len(page_text))
+                        except Exception as page_exc:
+                            logger.warning("Failed to extract text from page %d: %s", page_num, page_exc)
+                    logger.info("PDF extraction complete: %d characters extracted from %d pages", 
+                              len(text), len(pdf_reader.pages))
+                    return text
+            except ImportError:
+                logger.error("PyPDF2 not available - cannot extract PDF text. Install with: pip install PyPDF2")
+                return ""
+            except Exception as pdf_exc:
+                logger.error("Failed to extract PDF text from %s: %s", file_path, pdf_exc, exc_info=True)
+                return ""
+        
+        # DOCX extraction
+        elif file_ext in {'.docx', '.doc'}:
+            logger.info("Attempting DOCX text extraction from %s", file_path)
+            try:
+                from docx import Document
+                logger.debug("python-docx available, extracting DOCX text")
+                doc = Document(path)
+                text = '\n'.join([para.text for para in doc.paragraphs])
+                logger.info("DOCX extraction complete: %d characters extracted", len(text))
+                return text
+            except ImportError:
+                logger.error("python-docx not available - cannot extract DOCX text. Install with: pip install python-docx")
+                return ""
+            except Exception as docx_exc:
+                logger.error("Failed to extract DOCX text from %s: %s", file_path, docx_exc, exc_info=True)
+                return ""
+        
+        # Try reading as text anyway (for unknown text-like files)
+        else:
+            logger.debug("Unknown file type, attempting to read as text: %s", file_path)
+            try:
+                text = path.read_text(encoding='utf-8', errors='ignore')
+                logger.info("Read %d characters as text from %s", len(text), file_path)
+                return text
+            except UnicodeDecodeError:
+                logger.warning("File %s appears to be binary (cannot decode as UTF-8)", file_path)
+                return ""
+            except Exception as text_exc:
+                logger.warning("Failed to read %s as text: %s", file_path, text_exc)
+                return ""
+                
     except Exception as exc:
-        logger.warning("Failed to extract text from %s: %s", file_path, exc)
+        logger.error("Unexpected error extracting text from %s: %s", file_path, exc, exc_info=True)
         return ""
 
 
@@ -189,18 +254,33 @@ def meta_generator(
     """
     path = Path(file_path)
     
+    # Extract descriptive text from extra metadata if available (from CLIP model or text summary)
+    descriptive_text = ""
+    if extra:
+        # Priority: explicit descriptive_text > multimodal_extra text > summary
+        descriptive_text = extra.get("descriptive_text") or extra.get("multimodal_extra", {}).get("text") or ""
+    
+    # If no descriptive text from CLIP, use summary as descriptive text
+    if not descriptive_text:
+        descriptive_text = summary
+    
+    # Use descriptive text if available, otherwise use summary
+    display_text = descriptive_text if descriptive_text else summary
+    
     meta_doc = {
         "original_name": path.name,
         "storage_uri": storage_uri,
         "tenant_id": tenant_id,
         "collection_hint": collection,
-        "summary_preview": summary[:500] if summary else "",
+        "summary_preview": display_text[:500] if display_text else "",
+        "descriptive_text": descriptive_text,  # Store full descriptive text for file structure
         "extension": path.suffix,
         "size_bytes": path.stat().st_size if path.exists() else 0,
         "extra": extra or {},
     }
     
-    if nosql_db and hasattr(nosql_db, 'files'):
+    # Check if MongoDB is available (use 'is not None' instead of truth value)
+    if nosql_db is not None and hasattr(nosql_db, 'files'):
         try:
             result = nosql_db.files.insert_one(meta_doc)
             meta_doc["_id"] = str(result.inserted_id)
@@ -252,7 +332,7 @@ def chunk_generator(
     chunks = simple_character_chunker(text)
     chunk_count = len(chunks)
     
-    if not nosql_db or not hasattr(nosql_db, collection):
+    if nosql_db is None or not hasattr(nosql_db, collection):
         logger.warning("MongoDB unavailable - chunks not stored for %s", file_path)
         return chunk_count
     

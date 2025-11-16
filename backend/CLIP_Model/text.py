@@ -1,94 +1,130 @@
 # text.py
 """
-Lightweight text backend used by the multimodal pipeline.
-
-The original repository only shipped the compiled artefact for this module,
-so we provide a simple, dependency-friendly implementation that can extract
-text from a few common formats and generate short summaries for CLIP.
+Text Backend for loading and summarizing text files.
 """
 
-from __future__ import annotations
-
-import json
 import logging
 from pathlib import Path
-from typing import Dict, Tuple
-
-try:
-    from PyPDF2 import PdfReader  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    PdfReader = None
-
-try:
-    from docx import Document  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    Document = None
+from typing import Tuple, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class TextBackend:
     """
-    Minimal text loader that mirrors the API expected by MultiModalPipeline.
+    Backend for loading and summarizing text files.
+    Handles various text file formats and generates summaries.
     """
-
-    def __init__(self, summary_chars: int = 800, embed_chars: int = 2048):
-        self.summary_chars = summary_chars
-        self.embed_chars = embed_chars
-
-    def load_and_summarise(self, path: str) -> Tuple[str, str, Dict[str, int]]:
+    
+    def __init__(self):
+        """Initialize text backend."""
+        pass
+    
+    def load_and_summarise(self, path: str) -> Tuple[str, str, Dict[str, Any]]:
+        """
+        Load text file and generate summary.
+        
+        Args:
+            path: Path to text file
+            
+        Returns:
+            Tuple of (summary, full_text, metadata_dict)
+        """
         file_path = Path(path)
+        
         if not file_path.exists():
-            raise FileNotFoundError(f"TextBackend could not find file: {path}")
-
-        raw_text = self._extract_text(file_path)
-        normalized = " ".join(raw_text.split())
-
-        if not normalized:
-            summary = ""
-            embed_text = ""
-        else:
-            summary = normalized[: self.summary_chars]
-            embed_text = normalized[: self.embed_chars]
-
-        meta = {
-            "num_chars": len(normalized),
-            "summary_chars": len(summary),
-        }
-
-        return summary, embed_text, meta
-
-    def _extract_text(self, path: Path) -> str:
-        ext = path.suffix.lower()
-
-        if ext == ".pdf" and PdfReader:
-            try:
-                reader = PdfReader(str(path))
-                return "\n".join(page.extract_text() or "" for page in reader.pages)
-            except Exception as exc:  # pragma: no cover - best effort
-                logger.warning("Failed to parse PDF %s: %s", path, exc)
-
-        if ext == ".docx" and Document:
-            try:
-                doc = Document(str(path))
-                return "\n".join(p.text for p in doc.paragraphs)
-            except Exception as exc:  # pragma: no cover - best effort
-                logger.warning("Failed to parse DOCX %s: %s", path, exc)
-
-        if ext in {".json", ".yaml", ".yml"}:
-            try:
-                text = path.read_text(encoding="utf-8", errors="ignore")
-                json.loads(text)  # validates json but we keep raw for embeddings
-                return text
-            except Exception:
-                return path.read_text(encoding="utf-8", errors="ignore")
-
+            logger.warning(f"Text file not found: {path}")
+            return f"File: {file_path.name}", "", {"error": "File not found"}
+        
         try:
-            return path.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            # Final fallback to binary read when encoding is unknown
-            data = path.read_bytes()
-            return data.decode("utf-8", errors="ignore")
-
-
-__all__ = ["TextBackend"]
+            # Read file content
+            text = self._read_file(file_path)
+            
+            if not text:
+                return f"File: {file_path.name}", "", {"error": "Empty file"}
+            
+            # Generate summary (first few sentences or first 200 chars)
+            summary = self._generate_summary(text)
+            
+            metadata = {
+                "file_size": len(text),
+                "file_name": file_path.name,
+                "file_ext": file_path.suffix,
+            }
+            
+            return summary, text, metadata
+            
+        except Exception as e:
+            logger.error(f"Failed to load text file {path}: {e}")
+            return f"File: {file_path.name} (error)", "", {"error": str(e)}
+    
+    def _read_file(self, file_path: Path) -> str:
+        """Read file content based on extension."""
+        ext = file_path.suffix.lower()
+        
+        # Try different encodings
+        encodings = ['utf-8', 'latin-1', 'cp1252']
+        
+        for encoding in encodings:
+            try:
+                return file_path.read_text(encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+            except Exception as e:
+                logger.warning(f"Failed to read {file_path} with {encoding}: {e}")
+                continue
+        
+        # If all encodings fail, read as binary and decode with errors='ignore'
+        try:
+            return file_path.read_bytes().decode('utf-8', errors='ignore')
+        except Exception as e:
+            logger.error(f"Failed to read file {file_path}: {e}")
+            return ""
+    
+    def _generate_summary(self, text: str, max_length: int = 200) -> str:
+        """
+        Generate summary from text.
+        
+        Args:
+            text: Full text content
+            max_length: Maximum summary length
+            
+        Returns:
+            Summary string
+        """
+        if not text:
+            return ""
+        
+        # Remove extra whitespace
+        text = ' '.join(text.split())
+        
+        # If text is short, return as-is
+        if len(text) <= max_length:
+            return text
+        
+        # Try to find sentence boundaries
+        sentences = self._split_sentences(text)
+        
+        if sentences:
+            # Take first few sentences that fit in max_length
+            summary_parts = []
+            current_length = 0
+            
+            for sentence in sentences:
+                if current_length + len(sentence) > max_length:
+                    break
+                summary_parts.append(sentence)
+                current_length += len(sentence) + 1  # +1 for space
+            
+            if summary_parts:
+                return ' '.join(summary_parts)
+        
+        # Fallback: just take first max_length characters
+        return text[:max_length].rstrip() + "..."
+    
+    def _split_sentences(self, text: str) -> list:
+        """Split text into sentences."""
+        import re
+        # Simple sentence splitting on common punctuation
+        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+        return [s.strip() for s in sentences if s.strip()]

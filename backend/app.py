@@ -36,8 +36,8 @@ from classification.main import process_upload_request, ClassificationProcessor
 
 # Import SQL processing components
 try:
-    from file_classifier import FileClassifier, classify_file
-    from file_to_sql import FileToSQLConverter, convert_file_to_sql
+    from sql.file_classifier import FileClassifier, classify_file
+    from sql.file_to_sql import FileToSQLConverter, convert_file_to_sql
     HAS_SQL_PROCESSING = True
 except ImportError:
     HAS_SQL_PROCESSING = False
@@ -537,7 +537,18 @@ def semantic_search():
     if engine and engine.available:
         try:
             logger.info("/api/search/semantic requested (query length=%d, limit=%d)", len(query), limit)
+            # Search ChromaDB embeddings - this searches the descriptive text from CLIP
             results = engine.search(query, limit=limit)
+            logger.info("Semantic search found %d results from ChromaDB embeddings", len(results))
+            
+            # Filter for video/audio if query suggests media search
+            query_lower = query.lower()
+            if any(word in query_lower for word in ['video', 'movie', 'clip', 'film', 'audio', 'sound', 'music', 'song']):
+                # Prioritize media results
+                media_results = [r for r in results if r.get('modality') in ['video', 'audio', 'image']]
+                if media_results:
+                    results = media_results[:limit]
+                    logger.info("Filtered to %d media results", len(results))
         except Exception:
             logger.exception("Semantic search engine failed; falling back to metadata search")
 
@@ -599,6 +610,9 @@ def build_file_tree(files: list) -> dict:
     """
     Build a hierarchical file tree structure from MongoDB file documents.
     
+    Uses descriptive text from CLIP embeddings to organize files into folders
+    based on semantic content rather than just file types.
+    
     Args:
         files: List of file documents from MongoDB
         
@@ -608,47 +622,73 @@ def build_file_tree(files: list) -> dict:
     # Create a nested dictionary structure
     tree = {}
     
+    # Helper function to extract folder name from descriptive text
+    def get_folder_from_description(descriptive_text: str, collection: str, modality: str) -> str:
+        """Extract folder name from descriptive text or use collection/modality."""
+        if not descriptive_text:
+            # Fallback to collection or modality
+            if collection and collection != "general":
+                return collection.title()
+            return modality.title() if modality else "Other"
+        
+        # Use first few words or key phrases from descriptive text
+        words = descriptive_text.lower().split()[:3]  # First 3 words
+        # Remove common stop words
+        stop_words = {'a', 'an', 'the', 'is', 'are', 'was', 'were', 'this', 'that', 'image', 'video', 'audio', 'file', 'picture', 'photo'}
+        meaningful_words = [w for w in words if w not in stop_words and len(w) > 2]
+        
+        if meaningful_words:
+            # Use first meaningful word as folder name
+            folder_name = meaningful_words[0].title()
+            # Limit folder name length
+            if len(folder_name) > 20:
+                folder_name = folder_name[:20]
+            return folder_name
+        
+        # Final fallback
+        return collection.title() if collection != "general" else "Other"
+    
     for file_doc in files:
+        # Get descriptive text (from CLIP model) or fallback to summary
+        descriptive_text = file_doc.get('descriptive_text') or file_doc.get('summary_preview', '')
+        collection = file_doc.get('collection_hint', 'general')
+        modality = (file_doc.get('extra') or {}).get('modality', '')
+        
+        # Determine folder based on descriptive text
+        folder_name = get_folder_from_description(descriptive_text, collection, modality)
+        
         # Use storage_uri if available, otherwise use original_name
         path_str = file_doc.get('storage_uri') or file_doc.get('original_name', 'unknown')
+        file_name = file_doc.get('original_name', path_str.split('/')[-1] if '/' in path_str else path_str)
         
-        # Extract path components
-        path_parts = path_str.replace('\\', '/').strip('/').split('/')
+        # Build structure: folder_name -> file
+        if folder_name not in tree:
+            tree[folder_name] = {
+                'name': folder_name,
+                'type': 'folder',
+                'children': {}
+            }
         
-        # Build nested structure
-        current = tree
-        for i, part in enumerate(path_parts):
-            is_file = i == len(path_parts) - 1
-            
-            if part not in current:
-                if is_file:
-                    # It's a file
-                    size_bytes = file_doc.get('size_bytes', 0)
-                    extension = file_doc.get('extension', '')
-                    
-                    # Determine MIME type
-                    import mimetypes
-                    mime_type = mimetypes.guess_type(file_doc.get('original_name', ''))[0] or ''
-                    
-                    current[part] = {
-                        'name': part,
-                        'type': 'file',
-                        'size': format_size(size_bytes),
-                        'mimeType': mime_type,
-                        'file_id': file_doc.get('_id'),
-                        'original_name': file_doc.get('original_name', part),
-                        'extension': extension,
-                        'collection': file_doc.get('collection_hint', 'unknown')
-                    }
-                else:
-                    # It's a folder
-                    current[part] = {
-                        'name': part,
-                        'type': 'folder',
-                        'children': {}
-                    }
-            
-            current = current[part].get('children', {})
+        # Add file to folder
+        size_bytes = file_doc.get('size_bytes', 0)
+        extension = file_doc.get('extension', '')
+        
+        # Determine MIME type
+        import mimetypes
+        mime_type = mimetypes.guess_type(file_doc.get('original_name', ''))[0] or ''
+        
+        tree[folder_name]['children'][file_name] = {
+            'name': file_name,
+            'type': 'file',
+            'size': format_size(size_bytes),
+            'mimeType': mime_type,
+            'file_id': file_doc.get('_id'),
+            'original_name': file_doc.get('original_name', file_name),
+            'extension': extension,
+            'collection': collection,
+            'descriptive_text': descriptive_text[:200] if descriptive_text else '',  # Include descriptive text
+            'modality': modality
+        }
     
     # Convert nested dictionaries to the expected format with children arrays
     def convert_to_tree(node_dict):
@@ -657,10 +697,13 @@ def build_file_tree(files: list) -> dict:
         for key, value in node_dict.items():
             if isinstance(value, dict):
                 if value.get('type') == 'folder':
+                    # Sort children by name
+                    children_dict = value.get('children', {})
+                    sorted_children = sorted(children_dict.items(), key=lambda x: x[0].lower())
                     node = {
                         'name': value['name'],
                         'type': 'folder',
-                        'children': convert_to_tree(value.get('children', {}))
+                        'children': convert_to_tree(dict(sorted_children))
                     }
                 else:
                     # It's a file
@@ -671,112 +714,57 @@ def build_file_tree(files: list) -> dict:
     
     root_children = convert_to_tree(tree)
     
-    # If we have files at root level, create a simple structure
-    # Otherwise organize by type (Media, Documents, etc.)
-    if root_children:
-        # Check if files are already organized in folders
-        has_folders = any(child.get('type') == 'folder' for child in root_children)
-        
-        if has_folders:
-            # Already organized, return as is
-            return {
-                'name': 'Root',
-                'type': 'folder',
-                'children': root_children
-            }
-        else:
-            # Organize by file type
-            media_files = []
-            document_files = []
-            other_files = []
-            
-            for child in root_children:
-                mime_type = child.get('mimeType', '')
-                extension = child.get('extension', '').lower()
-                
-                if mime_type.startswith(('image/', 'video/', 'audio/')) or \
-                   extension in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', 
-                                '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv',
-                                '.mp3', '.wav', '.flac', '.aac', '.ogg']:
-                    media_files.append(child)
-                elif mime_type.startswith(('text/', 'application/pdf', 'application/json')) or \
-                     extension in ['.txt', '.pdf', '.json', '.csv', '.xml']:
-                    document_files.append(child)
-                else:
-                    other_files.append(child)
-            
-            children = []
-            if media_files:
-                children.append({
-                    'name': 'Media',
-                    'type': 'folder',
-                    'children': media_files
-                })
-            if document_files:
-                children.append({
-                    'name': 'Documents',
-                    'type': 'folder',
-                    'children': document_files
-                })
-            if other_files:
-                children.append({
-                    'name': 'Other',
-                    'type': 'folder',
-                    'children': other_files
-                })
-            
-            return {
-                'name': 'Root',
-                'type': 'folder',
-                'children': children
-            }
-    else:
-        # No files found
-        return {
-            'name': 'Root',
-            'type': 'folder',
-            'children': []
-        }
+    # Sort folders alphabetically
+    root_children.sort(key=lambda x: x.get('name', '').lower())
+    
+    # Return organized tree structure based on descriptive text
+    return {
+        'name': 'Root',
+        'type': 'folder',
+        'children': root_children
+    }
 
 
 def fetch_file_tree_from_db() -> dict:
     """
-    Build the visualization tree from either the on-disk storage directory or,
-    if unavailable, from MongoDB metadata.
+    Build the visualization tree from MongoDB metadata (semantic organization).
+    Falls back to storage directory if MongoDB is unavailable.
     """
-    storage_tree = build_storage_tree()
-    if storage_tree.get('children'):
-        return storage_tree
-
     default_tree = {
         'name': 'Root',
         'type': 'folder',
         'children': []
     }
 
-    if not HAS_MONGODB:
-        logger.warning("Visualization requested but MongoDB not available")
-        return default_tree
+    # Prioritize MongoDB-based semantic structure (uses descriptive_text for folders)
+    if HAS_MONGODB:
+        try:
+            nosql_db = get_nosql_db()
+            files_collection = nosql_db['files']
 
-    try:
-        nosql_db = get_nosql_db()
-        files_collection = nosql_db['files']
+            cleaned_files = []
+            for doc in files_collection.find({}):
+                doc = dict(doc)
+                if '_id' in doc:
+                    doc['_id'] = str(doc['_id'])
+                cleaned_files.append(doc)
 
-        cleaned_files = []
-        for doc in files_collection.find({}):
-            doc = dict(doc)
-            if '_id' in doc:
-                doc['_id'] = str(doc['_id'])
-            cleaned_files.append(doc)
-
-        logger.info("/api/visualization: found %d files in database", len(cleaned_files))
-        return build_file_tree(cleaned_files)
-    except Exception as exc:
-        logger.exception("Failed to fetch file tree from MongoDB")
-        return {
-            **default_tree,
-            'error': str(exc)
-        }
+            if cleaned_files:
+                logger.info("/api/visualization: found %d files in database, using semantic structure", len(cleaned_files))
+                return build_file_tree(cleaned_files)
+            else:
+                logger.info("/api/visualization: no files in MongoDB, falling back to storage tree")
+        except Exception as exc:
+            logger.exception("Failed to fetch file tree from MongoDB, falling back to storage")
+    
+    # Fallback to storage directory structure
+    storage_tree = build_storage_tree()
+    if storage_tree.get('children'):
+        logger.info("/api/visualization: using storage directory structure (%d entries)", len(storage_tree.get('children', [])))
+        return storage_tree
+    
+    logger.warning("Visualization requested but no files found in MongoDB or storage")
+    return default_tree
 
 
 def resolve_storage_root() -> Path | None:
@@ -828,6 +816,7 @@ def search_metadata_fallback(query: str, limit: int = 10) -> list[dict]:
         cursor = files_collection.find({
             '$or': [
                 {'summary_preview': regex},
+                {'descriptive_text': regex},  # Search descriptive text from CLIP
                 {'original_name': regex},
                 {'storage_uri': regex},
                 {'collection_hint': regex}
@@ -838,19 +827,22 @@ def search_metadata_fallback(query: str, limit: int = 10) -> list[dict]:
         for doc in cursor:
             doc_id = str(doc.get('_id'))
             storage_uri = doc.get('storage_uri') or doc.get('original_name')
+            # Get descriptive text (preferred) or summary
+            descriptive_text = doc.get('descriptive_text') or doc.get('summary_preview', '')
             metadata = {
                 'file_id': doc_id,
                 'modality': (doc.get('extra') or {}).get('modality') or doc.get('collection_hint'),
                 'collection': doc.get('collection_hint'),
                 'path': storage_uri,
                 'storage_uri': storage_uri,
-                'summary': doc.get('summary_preview', ''),
+                'summary': descriptive_text,  # Use descriptive text if available
+                'descriptive_text': descriptive_text,
             }
             results.append({
                 'id': doc_id,
                 'similarity': None,
                 'distance': None,
-                'text': doc.get('summary_preview', ''),
+                'text': descriptive_text,  # Use descriptive text for search results
                 'metadata': metadata,
                 'modality': metadata.get('modality')
             })

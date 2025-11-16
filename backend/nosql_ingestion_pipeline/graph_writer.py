@@ -29,8 +29,31 @@ class GraphEmbeddingWriter:
             return
 
         try:
+            # Ensure path is absolute and directory exists
+            from pathlib import Path
+            
+            # Clean path - remove any invalid characters
+            clean_path = persist_path.replace("<", "").replace(">", "").strip()
+            if not clean_path or clean_path in ["<>", ""]:
+                raise ValueError(f"Invalid ChromaDB path: {persist_path}")
+            
+            path_obj = Path(clean_path)
+            if not path_obj.is_absolute():
+                # Resolve relative to current working directory
+                path_obj = path_obj.resolve()
+            
+            # Validate path doesn't contain invalid characters
+            path_str = str(path_obj)
+            if "<" in path_str or ">" in path_str:
+                raise ValueError(f"ChromaDB path contains invalid characters: {path_str}")
+            
+            # Create directory if it doesn't exist
+            path_obj.mkdir(parents=True, exist_ok=True)
+            persist_path = str(path_obj)
+            
             client = chromadb.PersistentClient(path=persist_path)
             self._collection = client.get_or_create_collection(name=collection_name)
+            logger.info("ChromaDB initialized at: %s", persist_path)
         except Exception as exc:  # pragma: no cover - disk / driver errors
             self._error = str(exc)
             logger.warning("Unable to initialise ChromaDB collection: %s", exc)
