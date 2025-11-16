@@ -450,14 +450,116 @@ class SQLExecutor:
             pk_columns = [row[0] for row in cursor.fetchall()]
             logger.debug(f"Primary key columns for {table_name}: {pk_columns}")
             
+            # Check if primary key columns are missing from insert columns
+            # If so, check if they have defaults or can be auto-generated
+            normalized_columns = [normalize_attribute(col) for col in columns_to_insert]
+            missing_pk_columns = []
+            
+            if pk_columns:
+                for pk_col in pk_columns:
+                    if normalize_attribute(pk_col) not in normalized_columns:
+                        missing_pk_columns.append(pk_col)
+            
+            # If primary key is missing, check if it has a default value (e.g., SERIAL, sequence)
+            if missing_pk_columns:
+                logger.debug(f"Primary key column(s) missing from insert: {missing_pk_columns}")
+                
+                # Check column defaults and data types
+                cursor.execute("""
+                    SELECT column_name, column_default, data_type, is_nullable
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                    AND table_name = %s
+                    AND column_name = ANY(%s);
+                """, (table_name, missing_pk_columns))
+                
+                pk_info = {row[0]: {'default': row[1], 'type': row[2], 'nullable': row[3]} for row in cursor.fetchall()}
+                
+                # If PK has a default (e.g., nextval for SERIAL), we can omit it
+                # Otherwise, we need to generate values or skip the insert
+                can_omit_pk = all(
+                    info['default'] is not None or info['nullable'] == 'YES'
+                    for col, info in pk_info.items()
+                )
+                
+                if can_omit_pk:
+                    logger.debug(f"Primary key has default/generated value, omitting from insert: {missing_pk_columns}")
+                    # Don't add missing PK columns - PostgreSQL will use default
+                else:
+                    # PK is NOT NULL and has no default - we need to generate values
+                    logger.warning(f"Primary key column(s) {missing_pk_columns} are NOT NULL with no default. Generating values...")
+                    
+                    # For each missing PK column, generate next value using MAX+1 or sequence
+                    for pk_col in missing_pk_columns:
+                        # Try to get the sequence name for this column
+                        cursor.execute("""
+                            SELECT pg_get_serial_sequence(%s::text, %s::text);
+                        """, (table_name, pk_col))
+                        
+                        seq_result = cursor.fetchone()
+                        seq_name = seq_result[0] if seq_result and seq_result[0] else None
+                        
+                        if seq_name:
+                            # Use sequence nextval - generate values using sequence
+                            logger.debug(f"Using sequence {seq_name} for {pk_col}")
+                            
+                            # Get current sequence value and generate next values
+                            cursor.execute(f"SELECT last_value, is_called FROM {seq_name};")
+                            seq_result = cursor.fetchone()
+                            if seq_result:
+                                last_val, is_called = seq_result
+                                start_value = last_val if not is_called else last_val + 1
+                            else:
+                                start_value = 1
+                            
+                            logger.debug(f"Sequence {seq_name} current value: {start_value}")
+                            
+                            # Add PK column to insert list
+                            if normalize_attribute(pk_col) not in normalized_columns:
+                                columns_to_insert.insert(0, normalize_attribute(pk_col))
+                                normalized_columns.insert(0, normalize_attribute(pk_col))
+                                
+                                # Generate values using sequence for each row
+                                for i, row_tuple in enumerate(rows_to_insert):
+                                    new_value = start_value + i
+                                    rows_to_insert[i] = (new_value,) + row_tuple
+                                    logger.debug(f"Generated {pk_col} = {new_value} for row {i+1} using sequence")
+                        else:
+                            # No sequence - use MAX+1 approach
+                            logger.debug(f"No sequence found for {pk_col}, will generate using MAX+1")
+                            
+                            # Get current max value
+                            cursor.execute(f'SELECT COALESCE(MAX("{pk_col}"), 0) FROM "{table_name}";')
+                            max_val = cursor.fetchone()[0] or 0
+                            
+                            # Generate values starting from max+1 for each row
+                            logger.debug(f"Current MAX({pk_col}) = {max_val}, generating values from {max_val + 1}")
+                            
+                            # Add PK column to insert list
+                            if normalize_attribute(pk_col) not in normalized_columns:
+                                # Insert PK at the beginning
+                                columns_to_insert.insert(0, normalize_attribute(pk_col))
+                                normalized_columns.insert(0, normalize_attribute(pk_col))
+                                logger.debug(f"Added {pk_col} to columns_to_insert")
+                                
+                                # Add generated PK values to each row (at the beginning)
+                                start_value = max_val + 1
+                                for i, row_tuple in enumerate(rows_to_insert):
+                                    new_value = start_value + i
+                                    # Insert at the beginning
+                                    rows_to_insert[i] = (new_value,) + row_tuple
+                                    logger.debug(f"Generated {pk_col} = {new_value} for row {i+1}")
+            
             # Build INSERT SQL template with ON CONFLICT handling
             columns_str = ', '.join(f'"{col}"' for col in columns_to_insert)
+            
+            # Update normalized_columns after potentially adding PK columns
+            normalized_columns = [normalize_attribute(col) for col in columns_to_insert]
             
             # If primary key exists, use ON CONFLICT DO NOTHING to skip duplicates
             # Otherwise, use regular INSERT
             if pk_columns:
-                # Check if all PK columns are in columns_to_insert
-                normalized_columns = [normalize_attribute(col) for col in columns_to_insert]
+                # Check if all PK columns are in columns_to_insert (after generation)
                 pk_in_insert = all(
                     normalize_attribute(pk_col) in normalized_columns 
                     for pk_col in pk_columns
@@ -469,9 +571,9 @@ class SQLExecutor:
                     insert_template = f'INSERT INTO "{table_name}" ({columns_str}) VALUES %s ON CONFLICT ({pk_constraint}) DO NOTHING'
                     logger.debug(f"Using ON CONFLICT for primary key: {pk_constraint}")
                 else:
-                    # PK not in insert columns, use regular INSERT
+                    # PK not in insert columns (should not happen if we generated them)
                     insert_template = f'INSERT INTO "{table_name}" ({columns_str}) VALUES %s'
-                    logger.debug("Primary key columns not in insert columns, using regular INSERT")
+                    logger.warning("Primary key columns not in insert columns after generation - this should not happen")
             else:
                 # No primary key, use regular INSERT
                 insert_template = f'INSERT INTO "{table_name}" ({columns_str}) VALUES %s'
