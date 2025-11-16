@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -74,6 +75,7 @@ class NoSQLIngestionPipeline:
         )
         self.multimodal_pipeline = multimodal_pipeline
         self._text_encoder: Optional[Callable[[str], Any]] = self._resolve_text_encoder(multimodal_pipeline)
+        self._storage_root = self._compute_storage_root()
 
     def process_file(
         self,
@@ -130,6 +132,8 @@ class NoSQLIngestionPipeline:
             plan.payload.get("moved_to") if plan else None
         )
 
+        storage_uri = self._resolve_storage_uri(plan, path)
+
         try:
             meta_doc = meta_generator(
                 file_path=str(path),
@@ -137,7 +141,7 @@ class NoSQLIngestionPipeline:
                 summary=summary,
                 collection=collection,
                 nosql_db=self.nosql_db,
-                storage_uri=plan.path if plan else None,
+                storage_uri=storage_uri,
                 extra=extra_payload,
             )
 
@@ -158,7 +162,7 @@ class NoSQLIngestionPipeline:
                 chunk_texts=chunk_texts,
                 modality="text",
                 collection=collection,
-                file_path=str(path),
+                file_path=storage_uri,
             )
 
             result.status = "completed"
@@ -208,6 +212,8 @@ class NoSQLIngestionPipeline:
         collection = infer_collection(summary)
         plan = self._resolve_path_plan(summary, path)
 
+        storage_uri = self._resolve_storage_uri(plan, path)
+
         try:
             meta_doc = meta_generator(
                 file_path=str(path),
@@ -215,13 +221,13 @@ class NoSQLIngestionPipeline:
                 summary=summary,
                 collection=collection,
                 nosql_db=self.nosql_db,
-                storage_uri=plan.path if plan else None,
+                storage_uri=storage_uri,
                 extra={**extra_payload, "modality": modality, "multimodal_extra": info.get("extra")},
             )
 
             chunk_texts = simple_character_chunker(summary)
             chunk_count = chunk_generator(
-                file_path=str(path),
+                file_path=storage_uri,
                 file_id=meta_doc["_id"],
                 tenant_id=tenant_id,
                 collection=collection,
@@ -272,6 +278,7 @@ class NoSQLIngestionPipeline:
         summary = f"{modality.title()} file {path.name}"
         collection = "media_assets"
         plan = self._resolve_path_plan(summary, path)
+        storage_uri = self._resolve_storage_uri(plan, path)
 
         try:
             meta_doc = meta_generator(
@@ -280,7 +287,7 @@ class NoSQLIngestionPipeline:
                 summary=summary,
                 collection=collection,
                 nosql_db=self.nosql_db,
-                storage_uri=plan.path if plan else None,
+                storage_uri=storage_uri,
                 extra={**extra_payload, "modality": modality, "clip_status": "unavailable"},
             )
 
@@ -300,7 +307,7 @@ class NoSQLIngestionPipeline:
                 chunk_texts=chunk_texts,
                 modality=modality,
                 collection=collection,
-                file_path=str(path),
+                file_path=storage_uri,
             )
 
             result.status = "completed"
@@ -430,3 +437,43 @@ class NoSQLIngestionPipeline:
         except Exception:  # pragma: no cover - GPU/CLIP failures
             logger.warning("Failed to encode text for embeddings", exc_info=True)
             return None
+
+    def _compute_storage_root(self) -> Optional[Path]:
+        root = self.config.local_path_root or os.getenv("LOCAL_ROOT_REPO")
+        if not root:
+            return None
+        try:
+            path = Path(root).expanduser().resolve()
+            if path.exists():
+                return path
+        except Exception:
+            logger.warning("Unable to resolve storage root %s", root, exc_info=True)
+        return None
+
+    def _resolve_storage_uri(self, plan: Optional[PathPlan], original_path: Path) -> str:
+        candidate: Optional[str] = None
+        if plan:
+            payload = getattr(plan, "payload", {}) or {}
+            moved_to = payload.get("moved_to")
+            if moved_to:
+                candidate = str(moved_to)
+            elif plan.path:
+                candidate = str(plan.path)
+
+        if not candidate:
+            candidate = str(original_path)
+
+        candidate_path = Path(candidate)
+        try:
+            if candidate_path.is_absolute():
+                if self._storage_root:
+                    try:
+                        relative = candidate_path.resolve().relative_to(self._storage_root)
+                        return relative.as_posix()
+                    except Exception:
+                        return candidate_path.as_posix()
+                return candidate_path.as_posix()
+            return candidate_path.as_posix()
+        except Exception:
+            logger.warning("Failed to normalise storage uri for %s", candidate, exc_info=True)
+            return candidate

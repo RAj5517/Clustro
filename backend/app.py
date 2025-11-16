@@ -189,12 +189,6 @@ def get_visualization():
 @app.route('/api/search/semantic', methods=['POST'])
 def semantic_search():
     """Perform semantic search against stored embeddings."""
-    if not HAS_SEMANTIC_SEARCH:
-        return jsonify({
-            'success': False,
-            'error': 'Semantic search engine is not available on this deployment'
-        }), 503
-
     payload = request.get_json(silent=True) or {}
     query = (payload.get('query') or '').strip()
     limit = payload.get('limit', 10)
@@ -210,22 +204,29 @@ def semantic_search():
             'error': 'Query text is required'
         }), 400
 
-    engine = get_semantic_engine()
-    if not engine or not engine.available:
-        return jsonify({
-            'success': False,
-            'error': 'Semantic search engine is initialising or unavailable'
-        }), 503
-
-    logger.info("/api/search/semantic requested (query length=%d, limit=%d)", len(query), limit)
-    results = engine.search(query, limit=limit)
+    results = []
     source = 'semantic'
+    engine = get_semantic_engine() if HAS_SEMANTIC_SEARCH else None
+
+    if engine and engine.available:
+        try:
+            logger.info("/api/search/semantic requested (query length=%d, limit=%d)", len(query), limit)
+            results = engine.search(query, limit=limit)
+        except Exception:
+            logger.exception("Semantic search engine failed; falling back to metadata search")
 
     if not results:
         fallback_results = search_metadata_fallback(query, limit)
         if fallback_results:
             results = fallback_results
             source = 'metadata'
+    if not results:
+        storage_results = search_storage_fallback(query, limit)
+        if storage_results:
+            results = storage_results
+            source = 'storage'
+
+    results = normalize_search_results(results)
 
     return jsonify({
         'success': True,
@@ -531,6 +532,89 @@ def search_metadata_fallback(query: str, limit: int = 10) -> list[dict]:
     except Exception:
         logger.exception("Metadata fallback search failed")
         return []
+
+
+def search_storage_fallback(query: str, limit: int = 10) -> list[dict]:
+    """Fallback: scan on-disk storage directory for matching filenames/paths."""
+    root = resolve_storage_root()
+    if not root or not query:
+        return []
+
+    results = []
+    lowered_query = query.lower()
+
+    try:
+        for path in root.rglob('*'):
+            if len(results) >= limit:
+                break
+            if path.is_file():
+                relative_path = path.relative_to(root).as_posix()
+                name = path.name
+                searchable = f"{relative_path} {name}".lower()
+                if lowered_query in searchable:
+                    metadata = {
+                        'file_id': relative_path,
+                        'modality': 'file',
+                        'collection': 'storage',
+                        'path': relative_path,
+                        'storage_uri': relative_path,
+                        'summary': '',
+                    }
+                    results.append({
+                        'id': relative_path,
+                        'similarity': None,
+                        'distance': None,
+                        'text': '',
+                        'metadata': metadata,
+                        'modality': 'file'
+                    })
+        return results
+    except Exception:
+        logger.exception("Storage fallback search failed")
+        return []
+
+
+def normalize_search_results(results: list[dict]) -> list[dict]:
+    """Ensure each result has a normalized relative download path when possible."""
+    if not results:
+        return []
+
+    storage_root = resolve_storage_root()
+
+    normalized: list[dict] = []
+    for item in results:
+        metadata = dict(item.get('metadata') or {})
+
+        candidate_path = metadata.get('path') or metadata.get('storage_uri') or ''
+        normalized_path = _normalize_path(candidate_path, storage_root)
+        if normalized_path:
+            metadata['download_path'] = normalized_path
+            metadata['path'] = normalized_path
+        else:
+            metadata['download_path'] = candidate_path or None
+
+        normalized.append({
+            **item,
+            'metadata': metadata
+        })
+
+    return normalized
+
+
+def _normalize_path(path_str: str, root: Path | None) -> str | None:
+    if not path_str:
+        return None
+
+    path = Path(path_str)
+    if path.is_absolute():
+        if root and _is_within_root(path, root):
+            try:
+                return path.relative_to(root).as_posix()
+            except Exception:
+                return path_str
+        return path_str
+
+    return path.as_posix()
 
 
 def build_storage_tree() -> dict:
